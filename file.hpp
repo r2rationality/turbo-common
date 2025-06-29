@@ -236,8 +236,7 @@ namespace turbo::file {
         uint8_vector _buf;
     };
 
-    template <typename T=write_vector>
-    void read(const std::string &path, T &buffer)
+    inline void read(const std::string &path, uint8_vector &buffer)
     {
         const auto file_size = std::filesystem::file_size(path);
         buffer.resize(file_size);
@@ -245,10 +244,9 @@ namespace turbo::file {
         is.read(buffer.data(), buffer.size());
     }
 
-    template <typename T=write_vector>
-    T read(const std::string &path)
+    inline uint8_vector read(const std::string &path)
     {
-        T buf {};
+        uint8_vector buf {};
         read(path, buf);
         return buf;
     }

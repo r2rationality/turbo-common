@@ -203,7 +203,6 @@ namespace turbo {
         operator buffer() const noexcept
         {
             return { base_type::data(), SZ };
-            static_assert(std::is_convertible_v<byte_array, buffer>);
         }
 
         explicit operator std::string_view() const noexcept
@@ -383,167 +382,9 @@ namespace turbo {
     static_assert(std::is_constructible_v<buffer, uint8_vector>);
     static_assert(std::is_convertible_v<uint8_vector, buffer>);
 
-    // Intended to be used as the target for IO operations. Does not initialize newly allocated memory.
-    struct write_vector {
-        static write_vector from_hex(const std::string_view hex)
-        {
-            write_vector res(hex.size() / 2);
-            init_from_hex(res, hex);
-            return res;
-        }
-
-        write_vector(const write_vector &o):
-            write_vector { static_cast<buffer>(o) }
-        {
-        }
-
-        write_vector() =default;
-
-        write_vector(write_vector &&o) noexcept:
-            _capacity { o._capacity },
-            _size { o._size },
-            _ptr { std::move(o._ptr) }
-        {
-            o._capacity = 0;
-            o._size = 0;
-        }
-
-        write_vector(const size_t sz)
-        {
-            resize(sz);
-        }
-
-        write_vector(const buffer bytes)
-        {
-            resize(bytes.size());
-            memcpy(data(), bytes.data(), _size);
-        }
-
-        write_vector &operator=(write_vector &&o) noexcept
-        {
-            _capacity = o._capacity;
-            _size = o._size;
-            _ptr = std::move(o._ptr);
-            return *this;
-        }
-
-        write_vector &operator=(const write_vector &o)
-        {
-            return *this = static_cast<const buffer>(o);
-        }
-
-        write_vector &operator=(const buffer bytes)
-        {
-            resize(bytes.size());
-            memcpy(data(), bytes.data(), _size);
-            return *this;
-        }
-
-        void clear()
-        {
-            resize(0);
-        }
-
-        bool empty() const
-        {
-            return _size == 0;
-        }
-
-        void reserve(const size_t new_cap)
-        {
-            if (new_cap > _capacity) {
-                ptr_type new_ptr { reinterpret_cast<uint8_t *>(::operator new (new_cap)) };
-                // memcpy correctly handles the case when 0 bytes are copied
-                memcpy(new_ptr.get(), _ptr.get(), _size);
-                _ptr = std::move(new_ptr);
-                _capacity = new_cap;
-            }
-        }
-
-        void resize(const size_t new_sz)
-        {
-            reserve(new_sz);
-            _size = new_sz;
-        }
-
-        size_t size() const noexcept
-        {
-            return _size;
-        }
-
-        size_t capacity() const noexcept
-        {
-            return _capacity;
-        }
-
-        // can return a nullptr when _size is 0!
-        uint8_t *data() const noexcept
-        {
-            return _ptr.get();
-        }
-
-        uint8_t operator[](const size_t idx) const noexcept
-        {
-            return *(_ptr.get() + idx);
-        }
-
-        operator std::span<uint8_t>() const noexcept
-        {
-            return { data(), size() };
-        }
-
-        operator buffer() const noexcept
-        {
-            return { data(), size() };
-        }
-
-        std::string_view str() const noexcept
-        {
-            return { reinterpret_cast<const char *>(data()), size() };
-        }
-
-        std::strong_ordering operator<=>(const buffer &o) const noexcept
-        {
-            return static_cast<buffer>(*this) <=> o;
-        }
-
-        bool operator==(const buffer &o) const noexcept
-        {
-            return std::strong_ordering::equal == (*this <=> o);
-        }
-
-        bool operator==(const uint8_vector &o) const noexcept
-        {
-            return std::strong_ordering::equal == (*this <=> static_cast<buffer>(o));
-        }
-
-        bool operator==(const write_vector &o) const noexcept
-        {
-            return std::strong_ordering::equal == (*this <=> static_cast<buffer>(o));
-        }
-    private:
-        struct deleter_t {
-            void operator()(uint8_t *ptr)
-            {
-                ::operator delete(ptr);
-            }
-        };
-
-        using value_type = uint8_t;
-        using ptr_type = std::unique_ptr<value_type, deleter_t>;
-
-        size_t _capacity = 0;
-        size_t _size = 0;
-        ptr_type _ptr {};
+    struct buffer_lowercase: buffer {
+        using buffer::buffer;
     };
-
-    inline write_vector &operator<<(write_vector &v, const buffer buf)
-    {
-        const size_t end_off = v.size();
-        v.resize(end_off + buf.size());
-        memcpy(v.data() + end_off, buf.data(), buf.size());
-        return v;
-    }
 
     inline std::pmr::vector<uint8_t> &operator<<(std::pmr::vector<uint8_t> &v, const buffer buf)
     {
@@ -552,10 +393,6 @@ namespace turbo {
         memcpy(v.data() + end_off, buf.data(), buf.size());
         return v;
     }
-
-    struct buffer_lowercase: buffer {
-        using buffer::buffer;
-    };
 
     inline uint8_vector &operator<<(uint8_vector &v, const uint8_t b)
     {
@@ -585,10 +422,6 @@ namespace fmt {
 
     template<>
     struct formatter<turbo::buffer>: formatter<std::span<const uint8_t>> {
-    };
-
-    template<>
-    struct formatter<turbo::write_vector>: formatter<turbo::buffer> {
     };
 
     template<>

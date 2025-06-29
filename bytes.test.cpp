@@ -13,6 +13,52 @@ namespace {
 
 suite turbo_common_bytes_suite = [] {
     "turbo::common::bytes"_test = [] {
+        "buffer"_test = [] {
+            const byte_array<4> tmp { 0x01, 0x02, 0x03, 0x04 };
+            expect_equal(0x04030201, static_cast<buffer>(tmp).to<uint32_t>());
+            expect_equal(0x04, static_cast<buffer>(tmp).at(3));
+            expect_equal(0x0302, static_cast<buffer>(tmp).subbuf(1,2).to<uint16_t>());
+            expect_equal(0x04, static_cast<buffer>(tmp).subbuf(3).to<uint8_t>());
+            expect_equal(0, static_cast<buffer>(tmp).subbuf(4).size());
+            expect_equal(0, static_cast<buffer>(tmp).subbuf(4, 0).size());
+            expect(throws([&] { static_cast<buffer>(tmp).to<uint64_t>(); }));
+            expect(throws([&] { static_cast<buffer>(tmp).at(4); }));
+            expect(throws([&] { static_cast<buffer>(tmp).subbuf(5); }));
+            expect(throws([&] { static_cast<buffer>(tmp).subbuf(5, 0); }));
+        };
+        "byte_array contruct"_test = [] {
+            expect(throws([] { const byte_array<4> tmp { 5, 4, 3, 2, 5 }; }));
+            expect(throws([] { const byte_array<4> tmp { 5, 4, 3 }; }));
+            expect(throws([] { const byte_array<4> tmp { buffer { nullptr, 0} }; }));
+            expect(throws([] { const byte_array<4> tmp { std::string_view { nullptr, 0} }; }));
+        };
+        "byte_array assign"_test = [] {
+            byte_array<4> a {};
+            expect(throws([&] { a = buffer { nullptr, 0 }; }));
+            expect(throws([&] { a = std::string_view { nullptr, 0}; }));
+            a = std::string_view { "\x01\x02\x03\x04", 4 };
+            expect_equal(0x04030201, static_cast<buffer>(a).to<uint32_t>());
+        };
+        "byte_array bit"_test = [] {
+            byte_array<2> a { 0x85, 0x10 };
+            expect_equal(true, a.bit(0));
+            expect_equal(false, a.bit(1));
+            expect_equal(false, a.bit(2));
+            expect_equal(false, a.bit(3));
+            expect_equal(false, a.bit(4));
+            expect_equal(true, a.bit(5));
+            expect_equal(false, a.bit(6));
+            expect_equal(true, a.bit(7));
+            expect_equal(false, a.bit(8));
+            expect_equal(false, a.bit(9));
+            expect_equal(false, a.bit(10));
+            expect_equal(true, a.bit(11));
+            expect_equal(false, a.bit(12));
+            expect_equal(false, a.bit(13));
+            expect_equal(false, a.bit(14));
+            expect_equal(false, a.bit(15));
+            expect(throws([&] { a.bit(16); }));
+        };
         "do not initialize"_test = [] {
             // fill the stack with non-zero values
             {
@@ -51,6 +97,11 @@ suite turbo_common_bytes_suite = [] {
             expect_equal(3, a[2]);
             expect_equal(4, a[3]);
         };
+        "uint_from_oct"_test = [] {
+            expect_equal(1, uint_from_oct('1'));
+            expect(throws([&] { uint_from_oct('8'); }));
+            expect(throws([&] { uint_from_oct('a'); }));
+        };
         "construct from hex"_test = [] {
             using namespace std::literals;
             const auto a = byte_array<4>::from_hex("01020304");
@@ -59,6 +110,16 @@ suite turbo_common_bytes_suite = [] {
             expect_equal(2, a[1]);
             expect_equal(3, a[2]);
             expect_equal(4, a[3]);
+            expect(throws([&] { byte_array<4>::from_hex("01020304050x"); }));
+            expect(throws([&] { byte_array<4>::from_hex("0102030405x0"); }));
+        };
+        "operator<<"_test = [] {
+            using namespace std::string_view_literals;
+            uint8_vector a {};
+            a << 0x22;
+            expect_equal("\x22", a.str());
+            a << "\x33\x44"sv;
+            expect_equal("\x22\x33\x44", a.str());
         };
         "assign_span"_test = [] {
             byte_array<4> a { 1, 2, 3, 4 };
