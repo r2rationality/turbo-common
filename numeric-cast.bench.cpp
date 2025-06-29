@@ -2,6 +2,7 @@
  * Copyright (c) 2024-2025 R2 Rationality OÜ (info at r2rationality dot com) */
 
 #include "benchmark.hpp"
+#include "numeric-cast.hpp"
 
 namespace {
     using namespace turbo;

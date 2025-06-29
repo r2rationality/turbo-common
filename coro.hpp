@@ -6,9 +6,11 @@
  * https://github.com/sierkov/daedalus-turbo/blob/main/LICENSE */
 
 #include <coroutine>
-#include <vector>
 #include <exception>
+#include <optional>
 #include <utility>
+#include <vector>
+#include <turbo/common/error.hpp>
 
 namespace turbo::coro {
     template<typename T>

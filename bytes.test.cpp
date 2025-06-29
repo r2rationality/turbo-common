@@ -22,7 +22,6 @@ suite turbo_common_bytes_suite = [] {
             expect_equal(4, a.size());
             for (const auto &v: a)
                 expect(v != 0);
-            ankerl::nanobench::doNotOptimizeAway(a);
         };
         "initialize with zeros"_test = [] {
             byte_array<4> a {};
