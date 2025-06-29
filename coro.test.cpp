@@ -7,23 +7,88 @@
 #include <turbo/common/coro.hpp>
 #include <turbo/common/test.hpp>
 
-using namespace turbo;
-
 namespace {
-    coro::generator_task_t<int> my_coro()
+    using namespace turbo;
+    using namespace turbo::coro;
+
+    generator_t<int> counter(const int max)
     {
-        co_yield 22;
-        co_yield 33;
+        for (int i = 1; i <= max; ++i)
+            co_yield i;
+    }
+
+    task_t<int> compute()
+    {
+        co_return 7 * 6;
+    }
+
+    task_t<std::string> greet()
+    {
+        co_return "hello, coroutine!";
+    }
+
+    task_t<int> fail()
+    {
+        throw std::runtime_error("error in coroutine");
+        co_return 0; // unreachable but need to indicate a coroutine to compilers
     }
 }
 
-suite coroutine_suite = [] {
-    "coro"_test = [] {
-        std::vector<int> v {};
-        auto gen = my_coro();
-        while (gen.resume()) {
-            v.emplace_back(gen.take());
-        }
-        expect_equal(std::vector<int> { 22, 33 }, v);
+suite turbo_common_coro_suite = [] {
+    "turbo::common::coro"_test = [] {
+        "generator_t multiple co_yield"_test = [] {
+            std::vector<int> v {};
+            auto gen = counter(2);
+            while (gen.resume()) {
+                v.emplace_back(gen.take());
+            }
+            expect_equal(std::vector<int> { 1, 2 }, v);
+        };
+
+        "generator_t yields values in order"_test = [] {
+            auto c = counter(3);
+
+            expect_equal(true, c.resume());
+            expect_equal(1, c.take());
+
+            expect_equal(true, c.resume());
+            expect_equal(2, c.take());
+
+            expect_equal(true, c.resume());
+            expect_equal(3, c.take());
+
+            expect_equal(false, c.resume()); // No more values
+        };
+
+        "generator_t throws on empty take"_test = [] {
+            auto c = counter(1);
+
+            expect_equal(true, c.resume());
+            expect_equal(1, c.take());
+
+            // Now coroutine is done, take() without value should throw
+            expect(throws([&]{ c.take(); }));
+        };
+
+        "task_t returns correct result"_test = [] {
+            auto c = compute();
+            expect_equal(42, c.result());
+        };
+
+        "task_t works with std::string"_test = [] {
+            auto c = greet();
+            expect_equal("hello, coroutine!", c.result());
+        };
+
+        "task_t propagates exception"_test = [] {
+            auto c = fail();
+            expect(throws<std::runtime_error>([&]{ c.result(); }));
+        };
+
+        "task_t is movable"_test = [] {
+            auto c1 = compute();
+            task_t<int> c2 = std::move(c1);
+            expect_equal(42, c2.result());
+        };
     };
 };
