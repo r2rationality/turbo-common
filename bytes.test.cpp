@@ -15,12 +15,12 @@ suite turbo_common_bytes_suite = [] {
     "turbo::common::bytes"_test = [] {
         "buffer"_test = [] {
             const byte_array<4> tmp { 0x01, 0x02, 0x03, 0x04 };
-            expect_equal(0x04030201, static_cast<buffer>(tmp).to<uint32_t>());
-            expect_equal(0x04, static_cast<buffer>(tmp).at(3));
-            expect_equal(0x0302, static_cast<buffer>(tmp).subbuf(1,2).to<uint16_t>());
-            expect_equal(0x04, static_cast<buffer>(tmp).subbuf(3).to<uint8_t>());
-            expect_equal(0, static_cast<buffer>(tmp).subbuf(4).size());
-            expect_equal(0, static_cast<buffer>(tmp).subbuf(4, 0).size());
+            expect_equal(0x04030201U, static_cast<buffer>(tmp).to<uint32_t>());
+            expect_equal(0x04U, static_cast<buffer>(tmp).at(3));
+            expect_equal(0x0302U, static_cast<buffer>(tmp).subbuf(1,2).to<uint16_t>());
+            expect_equal(0x04U, static_cast<buffer>(tmp).subbuf(3).to<uint8_t>());
+            expect_equal(0U, static_cast<buffer>(tmp).subbuf(4).size());
+            expect_equal(0U, static_cast<buffer>(tmp).subbuf(4, 0).size());
             expect(throws([&] { static_cast<buffer>(tmp).to<uint64_t>(); }));
             expect(throws([&] { static_cast<buffer>(tmp).at(4); }));
             expect(throws([&] { static_cast<buffer>(tmp).subbuf(5); }));
@@ -37,10 +37,10 @@ suite turbo_common_bytes_suite = [] {
             expect(throws([&] { a = buffer { nullptr, 0 }; }));
             expect(throws([&] { a = std::string_view { nullptr, 0}; }));
             a = std::string_view { "\x01\x02\x03\x04", 4 };
-            expect_equal(0x04030201, static_cast<buffer>(a).to<uint32_t>());
+            expect_equal(0x04030201U, static_cast<buffer>(a).to<uint32_t>());
         };
         "byte_array bit"_test = [] {
-            byte_array<2> a { 0x85, 0x10 };
+            byte_array<2> a { 0x85U, 0x10U };
             expect_equal(true, a.bit(0));
             expect_equal(false, a.bit(1));
             expect_equal(false, a.bit(2));
@@ -65,7 +65,7 @@ suite turbo_common_bytes_suite = [] {
                 const byte_array<4> tmp { 5, 4, 3, 2 };
             }
             byte_array<4> a;
-            expect_equal(4, a.size());
+            expect_equal(4U, a.size());
             for (const auto &v: a)
                 expect(v != 0);
         };
