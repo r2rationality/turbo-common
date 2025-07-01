@@ -6,8 +6,10 @@
 #include <source_location>
 #define BOOST_UT_DISABLE_MODULE 1
 #include <boost/ut.hpp>
+// file and logger are included as a convenience as most unit tests require that functionality.
 #include "file.hpp"
 #include "format.hpp"
+#include "logger.hpp"
 
 namespace turbo {
     using namespace boost::ut;

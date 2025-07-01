@@ -5,12 +5,16 @@
  * This code is distributed under the license specified in:
  * https://github.com/sierkov/daedalus-turbo/blob/main/LICENSE */
 
+#include <atomic>
 #include <coroutine>
 #include <exception>
+#include <mutex>
 #include <optional>
 #include <utility>
-#include <vector>
+#include <spdlog/logger.h>
 #include <turbo/common/error.hpp>
+
+#include "logger.hpp"
 
 namespace turbo::coro {
     template<typename T>
@@ -140,12 +144,40 @@ namespace turbo::coro {
                 _coro.destroy();
         }
 
-        T result()
+        bool await_ready() const noexcept
         {
-            if (!_coro) [[unlikely]]
-                throw error("an attempt to get result from an empty coro::task_t!");
+            return false;
+        }
+
+        void await_suspend(std::coroutine_handle<> h)
+        {
+            if (!_waiter) [[unlikely]]
+                throw error("coro::task_t: cannot co_await on an a task_t that is already being co_awaited");
+            _waiter = h;
+        }
+
+        T await_resume() noexcept
+        {
+            return std::move(*_coro.promise()._value);
+        }
+
+        void notify()
+        {
+            if (_waiter) {
+                _waiter.resume();
+                _waiter = {};
+            }
+        }
+
+        [[nodiscard]] bool done() const
+        {
+            return _coro.done();
+        }
+
+        T resume()
+        {
             if (!_coro.done())
-                _coro(); // Start and complete coroutine if needed
+                _coro.resume(); // Start and complete coroutine if needed
             if (_coro.promise()._exception)
                 std::rethrow_exception(_coro.promise()._exception);
             return std::move(*_coro.promise()._value);
@@ -157,6 +189,7 @@ namespace turbo::coro {
         }
 
         handle_type _coro;
+        std::coroutine_handle<> _waiter;
     };
 
     template<>
@@ -196,14 +229,41 @@ namespace turbo::coro {
                 _coro.destroy();
         }
 
-        void wait()
+        [[nodiscard]] bool done() const
         {
-            //if (!_coro) [[unlikely]]
-            //    throw error("an attempt to get result from an empty coro::task_t!");
+            return _coro.done();
+        }
+
+        void resume()
+        {
             if (!_coro.done())
-                _coro(); // Start and complete coroutine if needed
+                _coro.resume(); // Start and complete coroutine if needed
             if (_coro.promise()._exception)
                 std::rethrow_exception(_coro.promise()._exception);
+        }
+
+        bool await_ready() const noexcept
+        {
+            return false;
+        }
+
+        void await_suspend(std::coroutine_handle<> h)
+        {
+            if (!_waiter) [[unlikely]]
+                throw error("coro::task_t: cannot co_await on an a task_t that is already being co_awaited");
+            _waiter = h;
+        }
+
+        void await_resume() noexcept
+        {
+        }
+
+        void notify()
+        {
+            if (_waiter) {
+                _waiter.resume();
+                _waiter = {};
+            }
         }
     private:
         explicit task_t(handle_type h):
@@ -212,5 +272,28 @@ namespace turbo::coro {
         }
 
         handle_type _coro;
+        std::coroutine_handle<> _waiter;
+    };
+
+    struct external_task_t {
+        std::coroutine_handle<> &waiter;
+        std::optional<std::function<void()>> suspend_action {};
+
+        bool await_ready() const noexcept
+        {
+            return false;
+        }
+
+        void await_suspend(std::coroutine_handle<> h)
+        {
+            waiter = h;
+            if (suspend_action)
+                suspend_action->operator()();
+        }
+
+        void await_resume() noexcept
+        {
+            waiter = {};
+        }
     };
 }
