@@ -151,7 +151,7 @@ namespace turbo::coro {
 
         void await_suspend(std::coroutine_handle<> h)
         {
-            if (!_waiter) [[unlikely]]
+            if (_waiter) [[unlikely]]
                 throw error("coro::task_t: cannot co_await on an a task_t that is already being co_awaited");
             _waiter = h;
         }
@@ -273,6 +273,22 @@ namespace turbo::coro {
 
         handle_type _coro;
         std::coroutine_handle<> _waiter;
+    };
+
+    struct immediate_task_t {
+        bool await_ready() const noexcept
+        {
+            return false;
+        }
+
+        void await_suspend(std::coroutine_handle<> h)
+        {
+            h.resume();
+        }
+
+        void await_resume() noexcept
+        {
+        }
     };
 
     struct external_task_t {
