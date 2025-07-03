@@ -72,23 +72,58 @@ suite turbo_common_coro_suite = [] {
 
         "task_t returns correct result"_test = [] {
             auto c = compute();
-            expect_equal(42, c.result());
+            expect_equal(42, c.resume());
         };
 
         "task_t works with std::string"_test = [] {
             auto c = greet();
-            expect_equal("hello, coroutine!", c.result());
+            expect_equal("hello, coroutine!", c.resume());
         };
 
         "task_t propagates exception"_test = [] {
             auto c = fail();
-            expect(throws<std::runtime_error>([&]{ c.result(); }));
+            expect(throws<std::runtime_error>([&]{ c.resume(); }));
         };
 
         "task_t is movable"_test = [] {
             auto c1 = compute();
             task_t<int> c2 = std::move(c1);
-            expect_equal(42, c2.result());
+            expect_equal(42, c2.resume());
+        };
+
+        "external_task_t"_test = [] {
+            size_t coro_steps = 0;
+            size_t num_resumes = 0;
+            std::coroutine_handle<> active_handle {};
+
+            auto my_coro = [&] -> task_t<void> {
+                ++coro_steps;
+                co_await external_task_t{active_handle};
+                ++coro_steps;
+                co_await external_task_t{active_handle};
+                ++coro_steps;
+                co_await external_task_t{active_handle};
+                ++coro_steps;
+                co_await external_task_t{active_handle};
+                ++coro_steps;
+                co_return;
+            };
+
+            auto c1 = my_coro();
+            ++num_resumes;
+            c1.resume();
+
+            for (size_t i = 0; i < 4; ++i) {
+                expect(!!active_handle);
+                if (active_handle) {
+                    ++num_resumes;
+                    active_handle.resume();
+                }
+            }
+
+            expect(c1.done());
+            expect_equal(5ULL, coro_steps);
+            expect_equal(5ULL, num_resumes);
         };
     };
 };
