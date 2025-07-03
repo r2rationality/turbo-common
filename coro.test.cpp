@@ -102,13 +102,13 @@ suite turbo_common_coro_suite = [] {
 
             auto my_coro = [&] -> task_t<void> {
                 ++coro_steps;
-                co_await external_task_t{active_handle};
+                co_await external_task_t{[&](auto h) { active_handle = h; }};
                 ++coro_steps;
-                co_await external_task_t{active_handle};
+                co_await external_task_t{[&](auto h) { active_handle = h; }};
                 ++coro_steps;
-                co_await external_task_t{active_handle};
+                co_await external_task_t{[&](auto h) { active_handle = h; }};
                 ++coro_steps;
-                co_await external_task_t{active_handle};
+                co_await external_task_t{[&](auto h) { active_handle = h; }};
                 ++coro_steps;
                 co_return;
             };
