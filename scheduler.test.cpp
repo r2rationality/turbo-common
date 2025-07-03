@@ -7,8 +7,8 @@
 using namespace std::literals;
 using namespace turbo;
 
-suite turbo_scheduler_suite = [] {
-    "turbo::scheduler"_test = [] {
+suite turbo_common_scheduler_suite = [] {
+    "turbo::common::scheduler"_test = [] {
         /*"chained_scheduling"_test = [] {
             scheduler s {};
             size_t preproc_calls = 0;

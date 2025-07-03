@@ -35,7 +35,7 @@ suite turbo_common_coro_bench_suite = [] {
         });
         b.run("task_t",[&] {
             auto c = compute();
-            ankerl::nanobench::doNotOptimizeAway(c.result());
+            ankerl::nanobench::doNotOptimizeAway(c.resume());
         });
     };
 };
