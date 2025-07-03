@@ -122,6 +122,7 @@ suite turbo_common_scheduler_bench_suite = [] {
                             std::chrono::duration<double> { std::chrono::system_clock::now() - start_time }.count() * 1000,
                             std::memory_order_relaxed
                         );
+                        ankerl::nanobench::doNotOptimizeAway(sum);
                     });
                 }
                 sched.process();
@@ -133,7 +134,7 @@ suite turbo_common_scheduler_bench_suite = [] {
                 for (size_t start = 0; start < tasks.size(); start += batch_size) {
                     auto end = std::min(start + batch_size, tasks.size());
                     auto coro = std::make_shared<coro::task_t<void>>(sum_batch_coro(total_time, tasks.begin() + start, tasks.begin() + end));
-                    sched.submit("math", 0, [&tasks, &total_time, coro=std::move(coro)]() mutable {
+                    sched.submit("math", 0, [coro=std::move(coro)]() mutable {
                         coro->resume();
                     });
                 }
@@ -159,6 +160,7 @@ suite turbo_common_scheduler_bench_suite = [] {
                                 std::chrono::duration<double> { std::chrono::system_clock::now() - start_time }.count() * 1000,
                                 std::memory_order_relaxed
                             );
+                            ankerl::nanobench::doNotOptimizeAway(sum);
                         });
                     }
                     tp.join();

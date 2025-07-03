@@ -18,6 +18,8 @@ extern "C" {
 #endif
 }
 #include <fstream>
+#include "error.hpp"
+#include "format.hpp"
 #include "mutex.hpp"
 #include "memory.hpp"
 

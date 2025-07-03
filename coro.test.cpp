@@ -40,7 +40,7 @@ suite turbo_common_coro_suite = [] {
             std::vector<int> v {};
             auto gen = counter(2);
             while (gen.resume()) {
-                v.emplace_back(gen.take());
+                v.emplace_back(gen.result());
             }
             expect_equal(std::vector<int> { 1, 2 }, v);
         };
@@ -49,13 +49,13 @@ suite turbo_common_coro_suite = [] {
             auto c = counter(3);
 
             expect_equal(true, c.resume());
-            expect_equal(1, c.take());
+            expect_equal(1, c.result());
 
             expect_equal(true, c.resume());
-            expect_equal(2, c.take());
+            expect_equal(2, c.result());
 
             expect_equal(true, c.resume());
-            expect_equal(3, c.take());
+            expect_equal(3, c.result());
 
             expect_equal(false, c.resume()); // No more values
         };
@@ -64,31 +64,35 @@ suite turbo_common_coro_suite = [] {
             auto c = counter(1);
 
             expect_equal(true, c.resume());
-            expect_equal(1, c.take());
+            expect_equal(1, c.result());
 
             // Now coroutine is done, take() without value should throw
-            expect(throws([&]{ c.take(); }));
+            expect(throws([&]{ c.result(); }));
         };
 
         "task_t returns correct result"_test = [] {
             auto c = compute();
-            expect_equal(42, c.resume());
+            c.resume();
+            expect_equal(42, c.result());
         };
 
         "task_t works with std::string"_test = [] {
             auto c = greet();
-            expect_equal("hello, coroutine!", c.resume());
+            c.resume();
+            expect_equal("hello, coroutine!", c.result());
         };
 
         "task_t propagates exception"_test = [] {
             auto c = fail();
-            expect(throws<std::runtime_error>([&]{ c.resume(); }));
+            c.resume();
+            expect(throws<std::runtime_error>([&]{ c.result(); }));
         };
 
         "task_t is movable"_test = [] {
             auto c1 = compute();
             task_t<int> c2 = std::move(c1);
-            expect_equal(42, c2.resume());
+            c2.resume();
+            expect_equal(42, c2.result());
         };
 
         "external_task_t"_test = [] {
@@ -124,6 +128,26 @@ suite turbo_common_coro_suite = [] {
             expect(c1.done());
             expect_equal(5ULL, coro_steps);
             expect_equal(5ULL, num_resumes);
+        };
+
+        "nested tasks"_test = [] {
+            auto coro_1 = [] -> task_t<int> {
+                logger::info("coro_1 started");
+                co_return 1;
+            };
+
+            auto coro_2 = [&] -> task_t<int> {
+                logger::info("coro_2 started");
+                const auto c1_res = co_await coro_1();
+                logger::info("coro_2 got coro_1 result: {}", c1_res);
+                co_return c1_res + 1;
+            };
+
+            auto my_coro = coro_2();
+            my_coro.resume();
+            expect(my_coro.done());
+            auto res = my_coro.result();
+            expect_equal(2, res);
         };
     };
 };

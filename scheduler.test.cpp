@@ -85,7 +85,7 @@ suite turbo_common_scheduler_suite = [] {
             });
             s.submit("bad_actor", 100, [] { throw error("Ha ha! I told ya!"); });
             expect(!s.process_ok());
-            expect_equal(1, num_err);
+            expect_equal(1ULL, num_err);
         };
         "exceptions_no_observer"_test = [] {
             scheduler s {};
