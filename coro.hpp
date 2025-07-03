@@ -143,9 +143,8 @@ namespace turbo::coro {
             std::suspend_always initial_suspend() noexcept { return  {}; }
             std::suspend_always final_suspend() noexcept
             {
-                auto mh = _my_handle();
                 auto ch = _caller;
-                scheduler::get().submit("final-suspend", 100, [mh, ch] {
+                scheduler::get().submit("final-suspend", 100, [ch] {
                     if (ch && !ch.done())
                         ch.resume();
                 });
