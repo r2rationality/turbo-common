@@ -1,11 +1,13 @@
 /* Copyright (c) 2022-2023 Alex Sierkov (alex dot sierkov at gmail dot com)
  * Copyright (c) 2024-2025 R2 Rationality OÜ (info at r2rationality dot com) */
 
-#include "scheduler.hpp"
 #include <filesystem>
+#include <random>
 #include <turbo/common/benchmark.hpp>
 #include <turbo/common/coro.hpp>
 #include <turbo/common/zstd.hpp>
+#include "numeric-cast.hpp"
+#include "scheduler.hpp"
 #ifdef _MSC_VER
 #   include <SDKDDKVer.h>
 #endif
@@ -45,11 +47,31 @@ namespace {
         sum_batch(total_time, begin, end);
         co_return;
     }
+
+    uint8_vector make_test_data_1(const size_t size)
+    {
+        uint8_vector res {};
+        res.reserve(size);
+        for (size_t i = 0; res.size() < size; ++i)
+            res << buffer::from(i);
+        return res;
+    }
+
+    uint8_vector make_test_data_2(const size_t size)
+    {
+        uint8_vector res {};
+        res.reserve(size);
+        std::random_device rd{};
+        std::mt19937 gen{rd()};
+        std::uniform_int_distribution<uint16_t> dist{0, 255};
+        while (res.size() < size)
+            res.emplace_back(numeric_cast<uint8_t>(dist(gen)));
+        return res;
+    }
 }
 
-suite turbo_scheduler_bench_suite = [] {
-    "turbo::scheduler"_test = [] {
-        static const std::string DATA_DIR { "./data/immutable"s };
+suite turbo_common_scheduler_bench_suite = [] {
+    "turbo::common::scheduler"_test = [] {
         auto &sched = scheduler::get();
         std::vector<double> tasks {};
         for (size_t i = 0; i < 1'000'000; ++i)
@@ -62,14 +84,9 @@ suite turbo_scheduler_bench_suite = [] {
         {
             size_t data_multiple = 20;
             std::vector<uint8_vector> chunks;
-            uint8_vector buf;
             size_t total_size = 0;
-            for (const auto &entry: std::filesystem::directory_iterator(DATA_DIR)) {
-                if (entry.path().extension() != ".chunk") continue;
-                file::read(entry.path().string(), buf);
-                total_size += buf.size();
-                chunks.push_back(buf);
-            }
+            total_size += chunks.emplace_back(make_test_data_1(8ULL << 20U)).size();
+            total_size += chunks.emplace_back(make_test_data_2(8ULL << 20U)).size();
             b.batch(total_size);
             b.unit("byte");
             b.run("scheduler/default progress update", [&] {
@@ -105,6 +122,7 @@ suite turbo_scheduler_bench_suite = [] {
                             std::chrono::duration<double> { std::chrono::system_clock::now() - start_time }.count() * 1000,
                             std::memory_order_relaxed
                         );
+                        ankerl::nanobench::doNotOptimizeAway(sum);
                     });
                 }
                 sched.process();
@@ -116,8 +134,8 @@ suite turbo_scheduler_bench_suite = [] {
                 for (size_t start = 0; start < tasks.size(); start += batch_size) {
                     auto end = std::min(start + batch_size, tasks.size());
                     auto coro = std::make_shared<coro::task_t<void>>(sum_batch_coro(total_time, tasks.begin() + start, tasks.begin() + end));
-                    sched.submit("math", 0, [&tasks, &total_time, coro=std::move(coro)]() mutable {
-                        coro->wait();
+                    sched.submit("math", 0, [coro=std::move(coro)]() mutable {
+                        coro->resume();
                     });
                 }
                 sched.process();
@@ -142,6 +160,7 @@ suite turbo_scheduler_bench_suite = [] {
                                 std::chrono::duration<double> { std::chrono::system_clock::now() - start_time }.count() * 1000,
                                 std::memory_order_relaxed
                             );
+                            ankerl::nanobench::doNotOptimizeAway(sum);
                         });
                     }
                     tp.join();

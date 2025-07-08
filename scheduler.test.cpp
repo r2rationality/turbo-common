@@ -7,8 +7,8 @@
 using namespace std::literals;
 using namespace turbo;
 
-suite turbo_scheduler_suite = [] {
-    "turbo::scheduler"_test = [] {
+suite turbo_common_scheduler_suite = [] {
+    "turbo::common::scheduler"_test = [] {
         /*"chained_scheduling"_test = [] {
             scheduler s {};
             size_t preproc_calls = 0;
@@ -85,7 +85,7 @@ suite turbo_scheduler_suite = [] {
             });
             s.submit("bad_actor", 100, [] { throw error("Ha ha! I told ya!"); });
             expect(!s.process_ok());
-            expect_equal(1, num_err);
+            expect_equal(1ULL, num_err);
         };
         "exceptions_no_observer"_test = [] {
             scheduler s {};

@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <boost/container/flat_map.hpp>
 #include <boost/thread.hpp>
 
 #include "logger.hpp"
@@ -41,19 +42,18 @@ namespace turbo {
                 throw error("the number of worker threads must be greater than zero!");
             logger::info("scheduler started, worker count: {}", _num_workers);
             _worker_tasks.resize(_num_workers);
-            std::map<boost::thread::id, size_t> ids {};
+            _worker_ids.reserve(_num_workers);
             // One worker is a special case handled by the process method itself
             if (_num_workers == 1) {
-                ids.emplace(boost::this_thread::get_id(), 0);
+                _worker_ids.emplace(boost::this_thread::get_id(), 0);
             } else {
                 boost::thread::attributes attrs {};
                 attrs.set_stack_size(16 << 20);
                 for (size_t i = 0; i < _num_workers; ++i) {
                     _workers.emplace_back(attrs, [this, i]() { _worker_thread(i); });
-                    ids.emplace(_workers.back().get_id(), i);
+                    _worker_ids.emplace_hint(_worker_ids.end(), _workers.back().get_id(), i);
                 }
             }
-            _worker_ids = ids;
         }
 
         ~impl()
@@ -266,7 +266,7 @@ namespace turbo {
         observer_map _observers {};
 
         std::vector<boost::thread> _workers {};
-        static_map<boost::thread::id, size_t> _worker_ids {};
+        boost::container::flat_map<boost::thread::id, size_t> _worker_ids {};
         std::vector<std::optional<std::string>> _worker_tasks {};
         const size_t _num_workers;
         std::atomic_size_t _num_active = 0;

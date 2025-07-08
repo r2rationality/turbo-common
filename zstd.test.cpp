@@ -6,8 +6,8 @@
 
 using namespace turbo;
 
-suite zstd_suite = [] {
-    "zstd"_test = [] {
+suite turbo_common_zstd_suite = [] {
+    "turbo::common::zstd"_test = [] {
         static const uint8_vector orig { std::string_view { "some text\0\x11\xFE" } };
         uint8_vector compressed {};
 
@@ -34,7 +34,9 @@ suite zstd_suite = [] {
             expect(decompressed.size() == 0_ull);
         };
         "file compress/decompress"_test = [] {
-            auto raw = file::read("./data/immutable/04309.chunk");
+            uint8_vector raw {};
+            for (size_t i = 0; i < 1000000; ++i)
+                raw << buffer::from(i);
             auto compressed = zstd::compress(raw, 1);
             auto decompressed = zstd::decompress(compressed);
             expect(decompressed == raw);

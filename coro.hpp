@@ -5,13 +5,12 @@
 #include <atomic>
 #include <coroutine>
 #include <exception>
+#include <future>
 #include <mutex>
 #include <optional>
 #include <utility>
-#include <spdlog/logger.h>
-#include <turbo/common/error.hpp>
-
-#include "logger.hpp"
+#include "error.hpp"
+#include "scheduler.hpp"
 
 namespace turbo::coro {
     template<typename T>
@@ -83,7 +82,7 @@ namespace turbo::coro {
             return !_coro.done();
         }
 
-        T take()
+        T result()
         {
             if (!_coro) [[unlikely]]
                 throw error("an attempt to call take on an empty coro::generator_t!");
@@ -103,29 +102,70 @@ namespace turbo::coro {
         }
     };
 
+    template <typename T>
+    struct result_storage_t {
+        void set_value(T&& v) { _value = std::move(v); }
+        T get() {
+            if (!_value) [[unlikely]]
+                throw error("get called on a coroutine result storage before it was set!");
+            return std::move(*_value);
+        }
+    protected:
+        std::optional<T> _value;
+    };
+
+    template <>
+    struct result_storage_t<void> {
+        void set_value() {}
+        void get() {}
+    };
+
+    template <typename T>
+    struct promise_base_t : result_storage_t<T> {
+        void return_value(T v) { this->set_value(std::move(v)); }
+    };
+
+    template <>
+    struct promise_base_t<void> : result_storage_t<void> {
+        void return_void() { this->set_value(); }
+    };
+
     template<typename T>
     struct task_t {
         struct promise_type;
         using handle_type = std::coroutine_handle<promise_type>;
 
-        struct promise_type {
-            task_t get_return_object() { return task_t{handle_type::from_promise(*this)}; }
-            std::suspend_always initial_suspend() noexcept { return {}; }
-            std::suspend_always final_suspend() noexcept { return {}; }
+        struct promise_type: promise_base_t<T> {
+            task_t get_return_object() { return task_t{_my_handle()}; }
+            std::suspend_always initial_suspend() noexcept { return  {}; }
+            std::suspend_always final_suspend() noexcept
+            {
+                auto ch = _caller;
+                scheduler::get().submit("final-suspend", 100, [ch] {
+                    if (ch && !ch.done())
+                        ch.resume();
+                });
+                return {};
+            }
             void unhandled_exception() { _exception = std::current_exception(); }
-            void return_value(T v) { _value = std::move(v); }
+            void set_exception(std::exception_ptr e) noexcept { _exception = e; }
         private:
+            handle_type _my_handle()
+            {
+                return handle_type::from_promise(*this);
+            }
+
             friend task_t;
-            std::optional<T> _value;
-            std::exception_ptr _exception;
+            std::exception_ptr _exception {};
+            std::coroutine_handle<> _caller {};
         };
 
-        task_t(task_t&& o) noexcept:
+        task_t(task_t &&o) noexcept:
             _coro{std::exchange(o._coro, {})}
         {
         }
 
-        task_t& operator=(task_t&& o) noexcept
+        task_t& operator=(task_t &&o) noexcept
         {
             if (this != &o) {
                 if (_coro)
@@ -143,138 +183,70 @@ namespace turbo::coro {
 
         bool await_ready() const noexcept
         {
-            return false;
+            return done();
         }
 
         void await_suspend(std::coroutine_handle<> h)
         {
-            if (!_waiter) [[unlikely]]
-                throw error("coro::task_t: cannot co_await on an a task_t that is already being co_awaited");
-            _waiter = h;
+            _coro.promise()._caller = h;
+            resume();
         }
 
         T await_resume() noexcept
         {
-            return std::move(*_coro.promise()._value);
-        }
-
-        void notify()
-        {
-            if (_waiter) {
-                _waiter.resume();
-                _waiter = {};
-            }
+            return result();
         }
 
         [[nodiscard]] bool done() const
         {
-            return _coro.done();
-        }
-
-        T resume()
-        {
-            if (!_coro.done())
-                _coro.resume(); // Start and complete coroutine if needed
-            if (_coro.promise()._exception)
-                std::rethrow_exception(_coro.promise()._exception);
-            return std::move(*_coro.promise()._value);
-        }
-    private:
-        explicit task_t(handle_type h):
-            _coro{h}
-        {
-        }
-
-        handle_type _coro;
-        std::coroutine_handle<> _waiter;
-    };
-
-    template<>
-    struct task_t<void> {
-        struct promise_type;
-        using handle_type = std::coroutine_handle<promise_type>;
-
-        struct promise_type {
-            task_t get_return_object() { return task_t{handle_type::from_promise(*this)}; }
-            std::suspend_always initial_suspend() noexcept { return {}; }
-            std::suspend_always final_suspend() noexcept { return {}; }
-            void unhandled_exception() { _exception = std::current_exception(); }
-            void return_void() noexcept {}
-        private:
-            friend task_t;
-            std::exception_ptr _exception;
-        };
-
-        task_t(task_t&& o) noexcept:
-            _coro{std::exchange(o._coro, {})}
-        {
-        }
-
-        task_t& operator=(task_t&& o) noexcept
-        {
-            if (this != &o) {
-                if (_coro)
-                    _coro.destroy();
-                _coro = std::exchange(o._coro, {});
-            }
-            return *this;
-        }
-
-        ~task_t()
-        {
-            if (_coro)
-                _coro.destroy();
-        }
-
-        [[nodiscard]] bool done() const
-        {
-            return _coro.done();
+            return _coro && _coro.done();
         }
 
         void resume()
         {
             if (!_coro.done())
-                _coro.resume(); // Start and complete coroutine if needed
-            if (_coro.promise()._exception)
-                std::rethrow_exception(_coro.promise()._exception);
+                _coro.resume();
         }
 
-        bool await_ready() const noexcept
+        T result()
         {
-            return false;
+            auto &p = _coro.promise();
+            if (p._exception)
+                std::rethrow_exception(p._exception);
+            return p.get();
         }
 
-        void await_suspend(std::coroutine_handle<> h)
+        T wait()
         {
-            if (!_waiter) [[unlikely]]
-                throw error("coro::task_t: cannot co_await on an a task_t that is already being co_awaited");
-            _waiter = h;
-        }
-
-        void await_resume() noexcept
-        {
-        }
-
-        void notify()
-        {
-            if (_waiter) {
-                _waiter.resume();
-                _waiter = {};
-            }
+            std::promise<T> promise;
+            auto future = promise.get_future();
+            auto wrapped_task = _notify_future(std::move(promise), *this);
+            wrapped_task.resume();
+            future.wait();
+            return future.get();
         }
     private:
+        task_t<void> _notify_future(std::promise<T> promise, task_t<T> &task)
+        {
+            auto res = co_await task;
+            promise.set_value(std::move(res));
+        }
+
         explicit task_t(handle_type h):
             _coro{h}
         {
         }
 
         handle_type _coro;
-        std::coroutine_handle<> _waiter;
     };
 
     struct external_task_t {
-        std::coroutine_handle<> &waiter;
-        std::optional<std::function<void()>> suspend_action {};
+        using action_t = std::function<void(std::coroutine_handle<>)>;
+
+        external_task_t(action_t suspend_action):
+            _suspend_action{std::move(suspend_action)}
+        {
+        }
 
         bool await_ready() const noexcept
         {
@@ -283,14 +255,39 @@ namespace turbo::coro {
 
         void await_suspend(std::coroutine_handle<> h)
         {
-            waiter = h;
-            if (suspend_action)
-                suspend_action->operator()();
+            _suspend_action.operator()(h);
         }
 
         void await_resume() noexcept
         {
-            waiter = {};
         }
+    private:
+        action_t _suspend_action;
+    };
+
+    struct get_handle_t {
+        using action_t = std::function<void(std::coroutine_handle<>)>;
+
+        get_handle_t(action_t suspend_action):
+            _suspend_action{std::move(suspend_action)}
+        {
+        }
+
+        bool await_ready() const noexcept
+        {
+            return false;
+        }
+
+        void await_suspend(std::coroutine_handle<> h)
+        {
+            _suspend_action.operator()(h);
+            h.resume();
+        }
+
+        void await_resume() noexcept
+        {
+        }
+    private:
+        action_t _suspend_action;
     };
 }

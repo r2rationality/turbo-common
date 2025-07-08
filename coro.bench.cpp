@@ -31,10 +31,11 @@ suite turbo_common_coro_bench_suite = [] {
         b.run("generator_t",[&] {
             auto c = counter(1);
             c.resume();
-            ankerl::nanobench::doNotOptimizeAway(c.take());
+            ankerl::nanobench::doNotOptimizeAway(c.result());
         });
         b.run("task_t",[&] {
             auto c = compute();
+            c.resume();
             ankerl::nanobench::doNotOptimizeAway(c.result());
         });
     };
