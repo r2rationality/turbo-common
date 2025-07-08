@@ -2,11 +2,11 @@
 /* Copyright (c) 2022-2023 Alex Sierkov (alex dot sierkov at gmail dot com)
  * Copyright (c) 2024-2025 R2 Rationality OÜ (info at r2rationality dot com) */
 
-#include <iostream>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include "logger.hpp"
-#include "timer.hpp"
 
 namespace turbo::cli {
     using arguments = std::vector<std::string>;
@@ -154,8 +154,8 @@ namespace turbo::cli {
                 _throw_usage(cfg);
             if (cfg.args.max && pr.args.size() > *cfg.args.max)
                 _throw_usage(cfg);
-            if (const auto opt_it = pr.opts.find("config-dir"); opt_it != pr.opts.end() && opt_it->second)
-                configs_dir::set_default_path(*opt_it->second);
+            //if (const auto opt_it = pr.opts.find("config-dir"); opt_it != pr.opts.end() && opt_it->second)
+            //    configs_dir::set_default_path(*opt_it->second);
             return pr;
         }
     protected:
@@ -193,6 +193,7 @@ namespace turbo::cli {
         config cfg {};
     };
 
-    extern int run(const int argc, const char **argv, const command::command_list &command_list);
-    extern int run(const int argc, const char **argv);
+    using global_options_proc_t = std::function<void(const options &)>;
+
+    extern int run(int argc, const char **argv, const std::optional<global_options_proc_t> &global_opts_f={});
 }

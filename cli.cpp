@@ -1,16 +1,18 @@
 /* Copyright (c) 2022-2023 Alex Sierkov (alex dot sierkov at gmail dot com)
  * Copyright (c) 2024-2025 R2 Rationality OÜ (info at r2rationality dot com) */
 
+#include <iostream>
 #include "cli.hpp"
+#include "timer.hpp"
 #ifndef _WIN32
 #   include <sys/resource.h>
 #endif
 
 namespace turbo::cli {
-    int run(const int argc, const char **argv, const command::command_list &command_list)
+    int run(const int argc, const char **argv, const command::command_list &command_list, const std::optional<global_options_proc_t> &global_opts_f)
     {
         std::set_terminate([]() {
-            std::cerr << fmt::format("std::terminate called; uncaught exceptions: {} - terminating\n", std::uncaught_exceptions());
+            logger::error("std::terminate called; uncaught exceptions: {} - terminating", std::uncaught_exceptions());
             std::abort();
         });
         std::ios_base::sync_with_stdio(false);
@@ -58,6 +60,8 @@ namespace turbo::cli {
             const auto &meta = cmd_it->second;
             timer t { fmt::format("run {}", cmd), logger::level::info };
             const auto pr = meta.cmd->parse(meta.cfg, args);
+            if (global_opts_f)
+                (*global_opts_f)(pr.opts);
             meta.cmd->run(pr.args, pr.opts);
         } catch (const std::exception &ex) {
             logger::error("{}: {}", cmd, ex.what());
@@ -69,8 +73,8 @@ namespace turbo::cli {
         return 0;
     }
 
-    int run(const int argc, const char **argv)
+    int run(const int argc, const char **argv, const std::optional<global_options_proc_t> &global_opts_f)
     {
-        return run(argc, argv, command::registry());
+        return run(argc, argv, command::registry(), global_opts_f);
     }
 }
