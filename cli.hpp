@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include "logger.hpp"
+#include "numeric-cast.hpp"
 
 namespace turbo::cli {
     using arguments = std::vector<std::string>;
@@ -196,4 +197,15 @@ namespace turbo::cli {
     using global_options_proc_t = std::function<void(const options &)>;
 
     extern int run(int argc, const char **argv, const std::optional<global_options_proc_t> &global_opts_f={});
+
+    template<typename T>
+    T from_str(const char *str)
+    {
+        char *end;
+        errno = 0;
+        const long val = strtoll(str, &end, 10);
+        if (errno || end == str || *end != '\0') [[unlikely]]
+            throw error_sys(fmt::format("failed to parse {} from '{}'", typeid(T).name(), str));
+        return numeric_cast<T>(val);
+    }
 }
