@@ -129,21 +129,19 @@ suite turbo_common_coro_suite = [] {
 
         "nested tasks"_test = [] {
             auto coro_1 = [] -> task_t<int> {
-                logger::info("coro_1 started");
                 co_return 1;
             };
 
             auto coro_2 = [&] -> task_t<int> {
-                logger::info("coro_2 started");
                 const auto c1_res = co_await coro_1();
-                logger::info("coro_2 got coro_1 result: {}", c1_res);
                 co_return c1_res + 1;
             };
 
             auto my_coro = coro_2();
             my_coro.resume();
+            scheduler::get().process();
             expect(my_coro.done());
-            auto res = my_coro.result();
+            const auto res = my_coro.result();
             expect_equal(2, res);
         };
     };

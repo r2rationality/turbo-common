@@ -135,9 +135,17 @@ namespace turbo::coro {
         struct promise_type;
         using handle_type = std::coroutine_handle<promise_type>;
 
-        struct promise_type: promise_base_t<T> {
-            task_t get_return_object() { return task_t{_my_handle()}; }
-            std::suspend_always initial_suspend() noexcept { return  {}; }
+        struct promise_type: promise_base_t<T>{
+            task_t get_return_object()
+            {
+                return task_t{_my_handle()};
+            }
+
+            std::suspend_always initial_suspend() noexcept
+            {
+                return  {};
+            }
+
             std::suspend_always final_suspend() noexcept
             {
                 auto ch = _caller;
@@ -147,8 +155,16 @@ namespace turbo::coro {
                 });
                 return {};
             }
-            void unhandled_exception() { _exception = std::current_exception(); }
-            void set_exception(std::exception_ptr e) noexcept { _exception = e; }
+
+            void unhandled_exception()
+            {
+                _exception = std::current_exception();
+            }
+
+            void set_exception(std::exception_ptr e) noexcept
+            {
+                _exception = e;
+            }
         private:
             handle_type _my_handle()
             {
