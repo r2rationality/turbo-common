@@ -326,6 +326,7 @@ namespace turbo::file {
     using path_str_list = std::vector<std::string>;
 
     extern void set_install_path(std::string_view bin_path);
+    extern void set_install_path_exact(const std::filesystem::path &p);
     extern std::string install_path(std::string_view rel_path);
     extern path_str_list files_with_ext(const std::string_view &dir, const std::string_view &ext);
     extern path_list files_with_ext_path(const std::string_view &dir, const std::string_view &ext);
