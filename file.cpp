@@ -65,8 +65,10 @@ namespace turbo::file {
 
     std::string install_path(const std::string_view rel_path)
     {
-        // provide a summy implementation at the moment
-        return fmt::format("./{}", rel_path);
+        std::filesystem::path rp{rel_path};
+        if (rp.is_relative())
+            return std::fileystem::absolute(rp).string();
+        return rp.string();
     }
 
     std::vector<std::filesystem::path> files_with_ext_path(const std::string_view &dir, const std::string_view &ext)
