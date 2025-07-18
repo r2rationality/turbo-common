@@ -132,9 +132,12 @@ suite turbo_common_scheduler_suite = [] {
             /*s.on_result("test", [r](const auto &) {
                 expect(r.use_count() == 2_l);
             });*/
-            s.submit("test", 100, [r] { return true; });
-            expect(r.use_count() == 2_l);
-            s.process(false);
+            {
+                auto task = [r] { return true; };
+                expect(r.use_count() == 2_l);
+                s.submit("test", 100, std::move(task));
+                s.process(false);
+            }
             expect(r.use_count() == 1_l);
         };
         "empty task list works"_test = [] {

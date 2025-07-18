@@ -63,12 +63,88 @@ namespace turbo::file {
         return pos;
     }
 
+    static std::filesystem::path &_install_dir()
+    {
+        static std::filesystem::path dir_path = std::filesystem::current_path();
+        return dir_path;
+    }
+
+    // These methods are designed to work with both Unix and Windows paths
+    // in exactly the same fashion independently of the host platform
+    static char _path_separator(const std::string_view path_str)
+    {
+        if (path_str.find('/')  != std::string::npos)
+            return '/';
+        if (path_str.find('\\') != std::string::npos)
+            return '\\';
+        return std::filesystem::path::preferred_separator;
+    }
+
+    static std::filesystem::path _path_append(const std::filesystem::path &base_path, const std::filesystem::path &rel_path)
+    {
+        const auto bp_str = base_path.string();
+        const auto sep = _path_separator(bp_str);
+        if (!bp_str.empty() && bp_str.back() != sep)
+            return bp_str + _path_separator(base_path.string()) + rel_path.string();
+        return bp_str + rel_path.string();
+    }
+
+    static std::filesystem::path _path_parent(const std::filesystem::path &path)
+    {
+        const auto pathstr = path.string();
+        const auto sep = _path_separator(pathstr);
+        if (const auto pos = pathstr.rfind(sep); pos != std::string::npos) {
+            if (sep == '\\') {
+                if (pos > 2)
+                    return pathstr.substr(0, pos);
+                if (pathstr.size() > 2)
+                    return pathstr.substr(0, 3);
+            } else {
+                if (pos > 0)
+                    return pathstr.substr(0, pos);
+                if (pathstr.size() > 1)
+                    return "/";
+            }
+        }
+        return {};
+    }
+
+    static bool _path_absolute(const std::filesystem::path &path)
+    {
+        const auto pathstr = path.string();
+        const auto sep = _path_separator(pathstr);
+        if (sep == '\\' && pathstr.size() >= 3 && pathstr[1] == ':' && pathstr[2] == '\\')
+            return true;
+        if (sep == '/' && !pathstr.empty() && pathstr.front() == '/')
+            return true;
+        return false;
+    }
+
+    void set_install_path(const std::string_view bin_path)
+    {
+        std::filesystem::path bp{bin_path};
+        if (bp.empty()) [[unlikely]]
+            throw error(fmt::format("set_install_path: bin_path must not be empty!"));
+        if (!_path_absolute(bp))
+            bp = _path_append(std::filesystem::current_path(), bp);
+        auto ip = bp;
+        for (size_t i = 0; i < 2; ++i) {
+            auto pp = _path_parent(ip);
+            if (pp.empty() || pp == ip) [[unlikely]]
+                throw error(fmt::format("set_install_path: bin_path must have at least two parent directories: {}!", bin_path));
+            ip = pp;
+        }
+        _install_dir() = ip;
+    }
+
     std::string install_path(const std::string_view rel_path)
     {
         std::filesystem::path rp{rel_path};
-        if (rp.is_relative())
-            return std::fileystem::absolute(rp).string();
-        return rp.string();
+        if (_path_absolute(rp))
+            return rp.string();
+        if (rp.empty())
+            return _install_dir().string();
+        return _path_append(_install_dir(), rp).string();
     }
 
     std::vector<std::filesystem::path> files_with_ext_path(const std::string_view &dir, const std::string_view &ext)

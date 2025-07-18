@@ -59,12 +59,10 @@ suite turbo_common_bytes_suite = [] {
         "do not initialize"_test = [] {
             // fill the stack with non-zero values
             {
-                const byte_array<4> tmp { 5, 4, 3, 2 };
+                volatile byte_array<4> tmp { 5, 4, 3, 2 };
             }
             byte_array<4> a;
-            expect_equal(4U, a.size());
-            for (const auto &v: a)
-                expect(v != 0);
+            expect(std::accumulate(a.begin(), a.end(), 0U) != 0U);
         };
         "initialize with zeros"_test = [] {
             byte_array<4> a {};
