@@ -208,4 +208,14 @@ namespace turbo::cli {
             throw error_sys(fmt::format("failed to parse {} from '{}'", typeid(T).name(), str));
         return numeric_cast<T>(val);
     }
+
+    template<typename T>
+    T from_str(const std::string_view str)
+    {
+        T value;
+        const auto [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), value);
+        if (ec != std::errc() || ptr != str.data() + str.size()) [[unlikely]]
+            throw error(fmt::format("failed to parse {} from '{}'", str, typeid(T).name()));
+        return value;
+    }
 }

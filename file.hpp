@@ -251,6 +251,13 @@ namespace turbo::file {
         return buf;
     }
 
+    inline uint8_vector read(const std::filesystem::path &path)
+    {
+        uint8_vector buf {};
+        read(path.string(), buf);
+        return buf;
+    }
+
     inline uint8_vector read_all(const std::span<const std::string> &paths)
     {
         uint8_vector data {};
@@ -269,7 +276,19 @@ namespace turbo::file {
         is.read(v.data(), v.size());
     }
 
-    inline void write(const std::string &path, const buffer &buffer) {
+    inline void write(const std::string &path, const buffer &buffer)
+    {
+        const auto tmp_path = fmt::format("{}.tmp", path);
+        {
+            write_stream os { tmp_path };
+            os.write(buffer.data(), buffer.size());
+        }
+        std::filesystem::rename(tmp_path, path);
+    }
+
+    inline void write(const std::filesystem::path &p, const buffer &buffer)
+    {
+        const auto path = p.string();
         const auto tmp_path = fmt::format("{}.tmp", path);
         {
             write_stream os { tmp_path };
