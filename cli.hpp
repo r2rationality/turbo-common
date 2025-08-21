@@ -194,9 +194,16 @@ namespace turbo::cli {
         config cfg {};
     };
 
-    using global_options_proc_t = std::function<void(const options &)>;
 
-    extern int run(int argc, const char **argv, const std::optional<global_options_proc_t> &global_opts_f={});
+    struct global_options_t {
+        using proc_t = std::function<void(const options &)>;
+
+        option_config_map opts;
+        proc_t proc;
+    };
+
+
+    extern int run(int argc, const char **argv, const std::optional<global_options_t> &global_opts={});
 
     template<typename T>
     T from_str(const char *str)
