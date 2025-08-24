@@ -108,6 +108,7 @@ suite turbo_common_bytes_suite = [] {
             expect_equal(4, a[3]);
             expect(throws([&] { byte_array<4>::from_hex("01020304050x"); }));
             expect(throws([&] { byte_array<4>::from_hex("0102030405x0"); }));
+            expect_equal(uint8_vector::from_hex("01020304"sv), uint8_vector::from_hex("0x01020304"sv));
         };
         "operator<<"_test = [] {
             using namespace std::string_view_literals;
