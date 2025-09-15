@@ -23,6 +23,23 @@ namespace turbo::codec {
     template<typename T>
     using variant_names_t = std::array<std::string_view, std::variant_size_v<T>>;
 
+    struct variant_index_overrides_t {
+        using decoder_override_map_t = std::map<uint8_t, size_t>;
+        using encoder_override_map_t = std::map<size_t, uint8_t>;
+        using init_type = decoder_override_map_t::value_type;
+
+        decoder_override_map_t decode_overrides;
+        encoder_override_map_t encode_overrides{};
+
+        explicit variant_index_overrides_t(const std::initializer_list<init_type> o):
+            decode_overrides{o}
+        {
+            for (const auto &[ci, vi]: decode_overrides) {
+                encode_overrides.try_emplace(vi, ci);
+            }
+        }
+    };
+
     template<typename T, size_t I>
     void variant_set_type(T &val, const size_t requested_type, auto &archive)
     {
