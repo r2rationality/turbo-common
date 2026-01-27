@@ -44,6 +44,9 @@ namespace turbo::logger {
     spdlog::logger create(const std::string &path)
     {
         std::cerr << fmt::format("INIT: log path: {}\n", path);
+        if (std::getenv("TURBO_LOG_CLEAR")) {
+            std::filesystem::remove(path);
+        }
         {
             std::ofstream os { path, std::ios_base::app };
             if (!os) {
