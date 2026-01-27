@@ -146,6 +146,11 @@ namespace turbo::codec {
             format(val);
         }
 
+        void process_string(const std::string &val)
+        {
+            process(val);
+        }
+
         void process(const std::string_view name, const auto &val)
         {
             _it = fmt::format_to(_it, "{:{}}", "", _depth * shift);
@@ -154,6 +159,16 @@ namespace turbo::codec {
             format(val);
             --_depth;
             _it = fmt::format_to(_it, "\n");
+        }
+
+        template<typename T>
+        void process_variant(T &val, const variant_names_t<T> &names, const variant_index_overrides_t *overrides=nullptr)
+        {
+            auto ci = val.index();
+            _it = fmt::format_to(_it, "<{}>: ", names[ci]);
+            std::visit([&](const auto &vv) {
+                process(vv);
+            }, val);
         }
 
         void process_map_item(const auto &k, const auto &v)
