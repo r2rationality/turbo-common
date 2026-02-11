@@ -162,7 +162,7 @@ namespace turbo::codec {
         }
 
         template<typename T>
-        void process_variant(T &val, const variant_names_t<T> &names, const variant_index_overrides_t *overrides=nullptr)
+        void process_variant(T &val, const variant_names_t<T> &names, const variant_index_overrides_t */*overrides*/=nullptr)
         {
             auto ci = val.index();
             _it = fmt::format_to(_it, "<{}>: ", names[ci]);
