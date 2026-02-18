@@ -3,6 +3,7 @@
  * Copyright (c) 2024-2025 R2 Rationality OÜ (info at r2rationality dot com) */
 
 #include <turbo/common/error.hpp>
+#include <turbo/common/format.hpp>
 #include <variant>
 
 namespace turbo::variant {
