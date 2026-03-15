@@ -11,57 +11,55 @@
 namespace turbo {
     typedef std::span<uint8_t> write_buffer;
 
-    template <typename T>
-    constexpr T host_to_net(T value) noexcept
-    {
-        const int x = 1;
-        if (*reinterpret_cast<const char *>(&x) == 1) {
-            char* ptr = reinterpret_cast<char*>(&value);
-            std::reverse(ptr, ptr + sizeof(T));
+    template <std::integral T>
+    [[nodiscard]] constexpr T byteswap_if_little_endian(T value) noexcept {
+        if constexpr (std::endian::native == std::endian::little) {
+            return std::byteswap(value);
         }
         return value;
     }
 
-    template <typename T>
-    constexpr T net_to_host(T value) noexcept
-    {
-        const int x = 1;
-        if (*reinterpret_cast<const char *>(&x) == 1) {
-            char* ptr = reinterpret_cast<char*>(&value);
-            std::reverse(ptr, ptr + sizeof(T));
-        }
-        return value;
+    template <std::integral T>
+    [[nodiscard]] constexpr T host_to_net(T value) noexcept {
+        return byteswap_if_little_endian(value);
+    }
+
+    template <std::integral T>
+    [[nodiscard]] constexpr T net_to_host(T value) noexcept {
+        return byteswap_if_little_endian(value);
     }
 
     struct buffer: std::span<const uint8_t> {
-        buffer() =default;
+        buffer() =delete;
         buffer(const buffer &) =default;
 
         template <typename T, size_t SZ>
         buffer(const std::span<T, SZ> bytes):
-            buffer { reinterpret_cast<const uint8_t *>(bytes.data()), SZ * sizeof(T) }
+            buffer{reinterpret_cast<const uint8_t *>(bytes.data()), SZ * sizeof(T)}
         {
         }
 
         template <typename T>
         buffer(const std::span<T> bytes):
-            buffer { reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size() * sizeof(T) }
-        {
-        }
-
-        buffer(const uint8_t *data, const size_t sz):
-            std::span<const uint8_t> { data, sz }
+            buffer{reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size() * sizeof(T)}
         {
         }
 
         buffer(const std::string_view s):
-            buffer { reinterpret_cast<const uint8_t *>(s.data()), s.size() }
+        buffer{reinterpret_cast<const uint8_t *>(s.data()), s.size()}
         {
         }
 
         buffer(const std::string &s):
-            buffer { reinterpret_cast<const uint8_t *>(s.data()), s.size() }
+            buffer{reinterpret_cast<const uint8_t *>(s.data()), s.size()}
         {
+        }
+
+        buffer(const uint8_t *data, const size_t sz):
+            std::span<const uint8_t>{data, sz}
+        {
+            if (data == nullptr && sz != 0) [[unlikely]]
+                throw error(fmt::format("a buffer cannot have a non-zero size {} with a null data pointer!", sz));
         }
 
         buffer &operator=(const buffer &o) =default;
@@ -75,9 +73,12 @@ namespace turbo {
         template<typename M>
         constexpr M to() const
         {
+            static_assert(std::is_trivially_copyable_v<M>);
             if (size() != sizeof(M)) [[unlikely]]
                 throw error(fmt::format("buffer size: {} does not match the type's size: {}!", size(), sizeof(M)));
-            return *reinterpret_cast<const M*>(data());
+            M result;
+            std::memcpy(&result, data(), sizeof(M));
+            return result;
         }
 
         template<typename M>
@@ -85,7 +86,7 @@ namespace turbo {
         {
             if (size() != sizeof(M)) [[unlikely]]
                 throw error(fmt::format("buffer size: {} does not match the type's size: {}!", size(), sizeof(M)));
-            return net_to_host(*reinterpret_cast<const M*>(data()));
+            return net_to_host(to<M>());
         }
 
         operator std::string_view() const noexcept
@@ -96,11 +97,13 @@ namespace turbo {
         std::strong_ordering operator<=>(const buffer &o) const noexcept
         {
             const auto min_sz = std::min(size(), o.size());
-            const auto cmp = memcmp(data(), o.data(), min_sz);
-            if (cmp < 0)
-                return std::strong_ordering::less;
-            if (cmp > 0)
-                return std::strong_ordering::greater;
+            if (min_sz > 0) [[likely]] {
+                const auto cmp = memcmp(data(), o.data(), min_sz);
+                if (cmp < 0)
+                    return std::strong_ordering::less;
+                if (cmp > 0)
+                    return std::strong_ordering::greater;
+            }
             return size() <=> o.size();
         }
 
@@ -118,7 +121,7 @@ namespace turbo {
 
         buffer subbuf(const size_t offset, const size_t sz) const
         {
-            if (offset + sz <= size()) [[likely]]
+            if ((offset <= size()) & (sz <= size() - offset)) [[likely]]
                 return buffer { data() + offset, sz };
             throw error(fmt::format("requested offset: {} and size: {} end over the end of buffer's size: {}!", offset, sz, size()));
         }
@@ -192,9 +195,8 @@ namespace turbo {
 
         bool bit(const size_t bit_no) const
         {
-            const auto byte_no = bit_no >> 3;
-            //
-            const auto byte_bit_no = (7 - bit_no) & 0x7;
+            const auto byte_no = bit_no >> 3U;
+            const auto byte_bit_no = size_t{7} - (bit_no & 0x7);
             if (byte_no >= SZ) [[unlikely]]
                 throw error(fmt::format("a bit number {} is out of range for byte strings of {} bytes", bit_no, SZ));
             return base_type::operator[](byte_no) & (1U << byte_bit_no);
@@ -273,7 +275,7 @@ namespace turbo {
 
     consteval uint8_t sl4(const uint8_t x)
     {
-        return x << 4U;
+        return static_cast<uint8_t>(x << 4U);
     }
 
     inline uint8_t uint_from_hex_hi(uint8_t k)
