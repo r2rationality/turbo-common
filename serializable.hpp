@@ -13,6 +13,7 @@ namespace turbo::codec {
     };
 
     template<typename T>
+        requires std::is_default_constructible_v<T>
     T from(auto &archive)
     {
         T res;
@@ -42,20 +43,6 @@ namespace turbo::codec {
 
     template<typename T, size_t I>
     void variant_set_type(T &val, const size_t requested_type, auto &archive)
-    {
-        if (requested_type >= std::variant_size_v<T>) [[unlikely]]
-            throw error(fmt::format("an unsupported type value {} for {}", requested_type, typeid(T).name()));
-        if constexpr (I < std::variant_size_v<T>) {
-            if (requested_type > I)
-                return variant_set_type<T, I + 1>(val, requested_type, archive);
-            if (requested_type < I) [[unlikely]]
-                throw error(fmt::format("internal error: an incomplete traversal of type {}", typeid(T).name()));
-            val = codec::from<std::variant_alternative_t<I, T>>(archive);
-        }
-    }
-
-    template<typename T, size_t I>
-    void variant_get_type(T &val, const size_t requested_type, auto &archive)
     {
         if (requested_type >= std::variant_size_v<T>) [[unlikely]]
             throw error(fmt::format("an unsupported type value {} for {}", requested_type, typeid(T).name()));
@@ -113,6 +100,8 @@ namespace turbo::codec {
         {
             if constexpr (serializable_c<T>) {
                 ++_depth;
+                // serialize() is intentionally non-const across the codebase (it's used for both
+                // encoding and decoding); const_cast is safe here as format() only reads via the archive
                 const_cast<T &>(val).serialize(*this);
                 --_depth;
             } else if constexpr (std::is_same_v<T, uint8_t>
@@ -270,7 +259,7 @@ namespace turbo::codec {
 
 namespace fmt {
     template<turbo::codec::serializable_c T>
-    struct formatter<T>: formatter<int> {
+    struct formatter<T>: formatter<std::string_view> {
         template<typename FormatContext>
         auto format(const T &v, FormatContext &ctx) const -> decltype(ctx.out())
         {
