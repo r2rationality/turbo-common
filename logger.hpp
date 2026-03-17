@@ -37,7 +37,7 @@ namespace turbo::logger {
     template<typename... Args>
     void log(const level lev, const std::string_view &fmt, Args&&... a)
     {
-        get().log(lev, format(fmt::runtime(fmt), std::forward<Args>(a)...));
+        get().log(lev, fmt::runtime(fmt), std::forward<Args>(a)...);
     }
 
     template<typename... Args>
@@ -76,22 +76,18 @@ namespace turbo::logger {
     inline std::exception_ptr run_log_errors(const action &main, const optional_action &cleanup={},
             const std::source_location &loc=std::source_location::current())
     {
-        std::exception_ptr cur_ex {};
+        std::exception_ptr cur_ex{};
         try {
             main();
-            if (cleanup)
-                (*cleanup)();
         } catch (const std::exception &ex) {
             cur_ex = std::current_exception();
             error("block at {}:{} failed with std::exception: {}", loc.file_name(), loc.line(), ex.what());
-            if (cleanup)
-                (*cleanup)();
         } catch (...) {
             cur_ex = std::current_exception();
             error("block at {}:{} failed with an unknown error", loc.file_name(), loc.line());
-            if (cleanup)
-                (*cleanup)();
         }
+        if (cleanup)
+            (*cleanup)();
         return cur_ex;
     }
 
