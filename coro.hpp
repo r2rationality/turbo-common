@@ -8,6 +8,7 @@
 #include <future>
 #include <mutex>
 #include <optional>
+#include <stop_token>
 #include <utility>
 #include "error.hpp"
 #include "scheduler.hpp"
@@ -165,7 +166,18 @@ namespace turbo::coro {
             {
                 _exception = e;
             }
+
+            std::stop_token get_stop_token() const noexcept
+            {
+                return _stop_token;
+            }
+
+            void set_stop_token(std::stop_token tok) noexcept
+            {
+                _stop_token = std::move(tok);
+            }
         private:
+            std::stop_token _stop_token{};
             handle_type _my_handle()
             {
                 return handle_type::from_promise(*this);
@@ -208,9 +220,14 @@ namespace turbo::coro {
             resume();
         }
 
-        T await_resume() noexcept
+        T await_resume()
         {
             return result();
+        }
+
+        void set_stop_token(std::stop_token tok) noexcept
+        {
+            _coro.promise().set_stop_token(std::move(tok));
         }
 
         [[nodiscard]] bool done() const
