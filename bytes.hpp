@@ -121,7 +121,7 @@ namespace turbo {
 
         buffer subbuf(const size_t offset, const size_t sz) const
         {
-            if ((offset <= size()) & (sz <= size() - offset)) [[likely]]
+            if (static_cast<int>(offset <= size()) & static_cast<int>(sz <= size() - offset)) [[likely]]
                 return buffer { data() + offset, sz };
             throw error(fmt::format("requested offset: {} and size: {} end over the end of buffer's size: {}!", offset, sz, size()));
         }
