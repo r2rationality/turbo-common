@@ -1,17 +1,14 @@
 #pragma once
 /* Copyright (c) 2022-2023 Alex Sierkov (alex dot sierkov at gmail dot com)
- * Copyright (c) 2024-2025 R2 Rationality OÜ (info at r2rationality dot com) */
+ * Copyright (c) 2024-2026 R2 Rationality OÜ (info at r2rationality dot com) */
 
-#include <atomic>
 #include <coroutine>
 #include <exception>
 #include <future>
-#include <mutex>
 #include <optional>
 #include <stop_token>
 #include <utility>
 #include "error.hpp"
-#include "scheduler.hpp"
 
 namespace turbo::coro {
     template<typename T>
@@ -147,13 +144,20 @@ namespace turbo::coro {
                 return  {};
             }
 
-            std::suspend_always final_suspend() noexcept
+            struct final_awaitable_t {
+                bool await_ready() noexcept { return false; }
+                std::coroutine_handle<> await_suspend(handle_type h) noexcept
+                {
+                    auto caller = h.promise()._caller;
+                    if (caller && !caller.done())
+                        return caller;
+                    return std::noop_coroutine();
+                }
+                void await_resume() noexcept {}
+            };
+
+            final_awaitable_t final_suspend() noexcept
             {
-                auto ch = _caller;
-                scheduler::get().submit("final-suspend", 100, [ch] {
-                    if (ch && !ch.done())
-                        ch.resume();
-                });
                 return {};
             }
 
