@@ -30,8 +30,10 @@ namespace turbo {
     }
 
     struct buffer: std::span<const uint8_t> {
-        buffer() =delete;
-        buffer(const buffer &) =default;
+        using base_type = std::span<const uint8_t>;
+
+        buffer() = default;
+        buffer(const buffer &) = default;
 
         template <typename T, size_t SZ>
         buffer(const std::span<T, SZ> bytes):
@@ -110,6 +112,10 @@ namespace turbo {
         bool operator==(const buffer &o) const noexcept
         {
             return std::strong_ordering::equal == (*this <=> o);
+        }
+
+        explicit operator bool() const noexcept {
+            return !empty();
         }
 
         uint8_t at(const size_t off) const
