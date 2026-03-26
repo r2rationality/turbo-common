@@ -17,7 +17,7 @@ namespace turbo::codec {
     T from(auto &archive)
     {
         T res;
-        res.serialize(archive);
+        archive.process(res);
         return res;
     }
 
@@ -56,9 +56,23 @@ namespace turbo::codec {
     }
 
     template<typename T>
-    concept has_emplace_c = requires(T t)
+    concept has_emplace_c = requires(T t, typename T::value_type v)
     {
-        { t.emplace() };
+        t.emplace_hint_unique(t.end(), std::move(v));
+    };
+
+    template<typename T>
+    concept varlen_uint_c = requires(T t) {
+        { t.value() } -> std::integral;
+        t = typename T::base_type{};
+    };
+
+    template<typename T>
+    concept optional_like_c = requires(T t) {
+        t.reset();
+        t.emplace();
+        { t.has_value() } -> std::same_as<bool>;
+        *t;
     };
 
     template<typename T>
@@ -66,6 +80,26 @@ namespace turbo::codec {
     {
         { t.serialize(a) } -> std::same_as<void>;
     };
+
+    // Structural byte-buffer concepts. The !serializable_c guard prevents false matches on
+    // sequence_t<uint8_t,N> or fixed_sequence_t<uint8_t,N>, which are structurally identical
+    // but have a serialize() that encodes elements individually rather than as a raw blob.
+
+    // Fixed-size byte buffer: indexable uint8_t elements, no dynamic resizing.
+    template<typename T>
+    concept byte_array_like_c = !serializable_c<T>
+        && requires(T& t, size_t i) {
+            { t.data() } -> std::same_as<uint8_t*>;
+            { t[i] }     -> std::same_as<uint8_t&>;
+        } && !requires(T& t) { t.resize(size_t{}); };
+
+    // Dynamic byte sequence: uint8_t data pointer with runtime resize.
+    template<typename T>
+    concept byte_sequence_like_c = !serializable_c<T>
+        && requires(T& t) {
+            { t.data() } -> std::same_as<uint8_t*>;
+            t.resize(size_t{});
+        };
 
     template<typename T>
     concept has_foreach_c = requires(T t, typename T::observer_t obs)
@@ -98,7 +132,19 @@ namespace turbo::codec {
         template<typename T>
         void format(const T &val)
         {
-            if constexpr (serializable_c<T>) {
+            if constexpr (varlen_uint_c<T>) {
+                _it = fmt::format_to(_it, "{}", val.value());
+            } else if constexpr (optional_like_c<T>) {
+                if (val) {
+                    format(*val);
+                } else {
+                    _it = fmt::format_to(_it, "std::nullopt");
+                }
+            } else if constexpr (byte_array_like_c<T> || byte_sequence_like_c<T>) {
+                ++_depth;
+                _it = fmt::format_to(_it, "{:{}}#{}", "", _depth * shift, std::span<const uint8_t>{val.data(), val.size()});
+                --_depth;
+            } else if constexpr (serializable_c<T>) {
                 ++_depth;
                 // serialize() is intentionally non-const across the codebase (it's used for both
                 // encoding and decoding); const_cast is safe here as format() only reads via the archive
@@ -119,25 +165,10 @@ namespace turbo::codec {
             }
         }
 
-        void process_varlen_uint(const auto &val)
-        {
-            format(val);
-        }
-
-        void process_uint(const auto &val)
-        {
-            format(val);
-        }
-
         void process(const auto &val)
         {
             //_it = fmt::format_to(_it, "{:{}}", "", _depth * shift);
             format(val);
-        }
-
-        void process_string(const std::string &val)
-        {
-            process(val);
         }
 
         void process(const std::string_view name, const auto &val)
@@ -220,31 +251,11 @@ namespace turbo::codec {
         }
 
         template<typename T>
-        void process_optional(const T &val)
-        {
-            if (val) {
-                process(*val);
-            } else {
-                _it = fmt::format_to(_it, "{:{}}std::nullopt", "", _depth * shift);
-            }
-        }
-
-        template<typename T>
         void process_variant(const T &val, const codec::variant_names_t<T> &names)
         {
             std::visit([&](const auto &vv) {
                 process(names.at(val.index()), vv);
             }, val);
-        }
-
-        void process_bytes(const std::span<const uint8_t> bytes)
-        {
-            _it = fmt::format_to(_it, "{:{}}#{}", "", _depth * shift, bytes);
-        }
-
-        void process_bytes_fixed(const std::span<const uint8_t> bytes)
-        {
-            _it = fmt::format_to(_it, "{:{}}#{}", "", _depth * shift, bytes);
         }
 
         OUT_IT it() const
