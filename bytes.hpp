@@ -361,6 +361,11 @@ namespace turbo {
         {
             return std::strong_ordering::equal == (*this <=> o);
         }
+
+        explicit operator bool() const noexcept
+        {
+            return !empty();
+        }
     };
 
     static_assert(std::is_constructible_v<uint8_vector, buffer>);
