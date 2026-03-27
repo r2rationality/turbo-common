@@ -54,7 +54,8 @@ namespace fmt {
     };
 
     template <typename T>
-    concept not_serializable_derived_from_base = derived_from_base<T> && turbo::codec::not_serializable_c<T>;
+    concept not_serializable_derived_from_base = derived_from_base<T>
+        && !turbo::codec::archive_formattable_c<T>;
 
     template<>
     struct formatter<std::span<const uint8_t>>: formatter<int> {

@@ -145,7 +145,7 @@ suite turbo_common_bytes_suite = [] {
         };
         "string formatting support"_test = [] {
             auto data = byte_array<4>::from_hex("f0e1d2c3");
-            expect(fmt::format("{}", data) == "F0E1D2C3");
+            expect_equal("F0E1D2C3", fmt::format("{}", data)); 
         };
         "secure_array"_test = [] {
             using my_sec_array_t = secure_byte_array<4>;

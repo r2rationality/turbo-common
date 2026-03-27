@@ -110,6 +110,54 @@ namespace turbo::codec {
     template<typename T>
     concept not_serializable_c = !serializable_c<T>;
 
+    // Fixed-element array: type is tagged with is_element_sequence to distinguish from raw byte arrays.
+    template<typename T>
+    concept fixed_array_like_c = !serializable_c<T>
+        && requires { T::is_element_sequence; };
+
+    // Bounded dynamic range: has static min_size/max_size and is a range (e.g. sequence_t, set_t).
+    template<typename T>
+    concept bounded_range_c = !serializable_c<T>
+        && std::ranges::range<T>
+        && requires {
+            { T::min_size } -> std::convertible_to<size_t>;
+            { T::max_size } -> std::convertible_to<size_t>;
+        };
+
+    // Map-like: has key_type/mapped_type and a static config() with key_name/val_name.
+    template<typename T>
+    concept map_like_c = !serializable_c<T>
+        && requires {
+            typename T::key_type;
+            typename T::mapped_type;
+            { T::config().key_name } -> std::convertible_to<std::string_view>;
+            { T::config().val_name } -> std::convertible_to<std::string_view>;
+        };
+
+    template<typename T>
+    struct as_variant_t {
+        T &val;
+        const variant_names_t<T> &names;
+        const variant_index_overrides_t *overrides = nullptr;
+    };
+
+    template<typename T>
+    as_variant_t<T> as_variant(T &val, const variant_names_t<T> &names,
+                               const variant_index_overrides_t *ov = nullptr)
+    {
+        return { val, names, ov };
+    }
+
+    template<typename T>
+    concept archive_formattable_c = serializable_c<T>
+        || varlen_uint_c<T>
+        || optional_like_c<T>
+        || fixed_array_like_c<T>
+        || bounded_range_c<T>
+        || map_like_c<T>
+        || byte_array_like_c<T>
+        || byte_sequence_like_c<T>;
+
     template<typename OUT_IT>
     struct formatter: archive_t {
         static constexpr size_t shift = 2;
@@ -132,7 +180,13 @@ namespace turbo::codec {
         template<typename T>
         void format(const T &val)
         {
-            if constexpr (varlen_uint_c<T>) {
+            if constexpr (serializable_c<T>) {
+                ++_depth;
+                // serialize() is intentionally non-const across the codebase (it's used for both
+                // encoding and decoding); const_cast is safe here as format() only reads via the archive
+                const_cast<T &>(val).serialize(*this);
+                --_depth;
+            }  else if constexpr (varlen_uint_c<T>) {
                 _it = fmt::format_to(_it, "{}", val.value());
             } else if constexpr (optional_like_c<T>) {
                 if (val) {
@@ -140,16 +194,44 @@ namespace turbo::codec {
                 } else {
                     _it = fmt::format_to(_it, "std::nullopt");
                 }
+            } else if constexpr (fixed_array_like_c<T> || bounded_range_c<T>) {
+                if constexpr (bounded_range_c<T>) {
+                    if (!(static_cast<int>(val.size() >= T::min_size) & static_cast<int>(val.size() <= T::max_size))) [[unlikely]]
+                        throw error(fmt::format("array size {} is out of allowed bounds: [{}, {}]", val.size(), T::min_size, T::max_size));
+                }
+                _it = fmt::format_to(_it, "[\n");
+                ++_depth;
+                for (const auto &v: val) {
+                    _it = fmt::format_to(_it, "{:{}}", "", _depth * shift);
+                    format(v);
+                    _it = fmt::format_to(_it, "\n");
+                }
+                --_depth;
+                _it = fmt::format_to(_it, "{:{}}](size: {})", "", _depth * shift, val.size());
+            } else if constexpr (map_like_c<T>) {
+                _it = fmt::format_to(_it, "{{\n");
+                ++_depth;
+                if constexpr (has_foreach_c<T>) {
+                    val.foreach([&](const auto &k, const auto &v) {
+                        _it = fmt::format_to(_it, "{:{}}", "", _depth * shift);
+                        format(k);
+                        _it = fmt::format_to(_it, ": ");
+                        format(v);
+                        _it = fmt::format_to(_it, "\n");
+                    });
+                } else {
+                    for (const auto &[k, v]: val) {
+                        _it = fmt::format_to(_it, "{:{}}", "", _depth * shift);
+                        format(k);
+                        _it = fmt::format_to(_it, ": ");
+                        format(v);
+                        _it = fmt::format_to(_it, "\n");
+                    }
+                }
+                --_depth;
+                _it = fmt::format_to(_it, "{:{}}}}(size: {})", "", _depth * shift, val.size());
             } else if constexpr (byte_array_like_c<T> || byte_sequence_like_c<T>) {
-                ++_depth;
-                _it = fmt::format_to(_it, "{:{}}#{}", "", _depth * shift, std::span<const uint8_t>{val.data(), val.size()});
-                --_depth;
-            } else if constexpr (serializable_c<T>) {
-                ++_depth;
-                // serialize() is intentionally non-const across the codebase (it's used for both
-                // encoding and decoding); const_cast is safe here as format() only reads via the archive
-                const_cast<T &>(val).serialize(*this);
-                --_depth;
+                _it = fmt::format_to(_it, "{}", std::span<const uint8_t>{val.data(), val.size()});
             } else if constexpr (std::is_same_v<T, uint8_t>
                     || std::is_same_v<T, uint16_t>
                     || std::is_same_v<T, uint32_t>
@@ -182,80 +264,13 @@ namespace turbo::codec {
         }
 
         template<typename T>
-        void process_variant(T &val, const variant_names_t<T> &names, const variant_index_overrides_t */*overrides*/=nullptr)
+        void process(as_variant_t<T> av)
         {
-            auto ci = val.index();
-            _it = fmt::format_to(_it, "<{}>: ", names[ci]);
+            auto ci = av.val.index();
+            _it = fmt::format_to(_it, "<{}>: ", av.names[ci]);
             std::visit([&](const auto &vv) {
                 process(vv);
-            }, val);
-        }
-
-        void process_map_item(const auto &k, const auto &v)
-        {
-            format(k);
-            _it = fmt::format_to(_it, ": ");
-            format(v);
-        }
-
-        void process_map(const auto &m, const std::string_view, const std::string_view)
-        {
-            _it = fmt::format_to(_it, "{:{}}{{", "", _depth * shift);
-            if (!m.empty()) {
-                ++_depth;
-                _it = fmt::format_to(_it, "\n");
-                using T = std::decay_t<decltype(m)>;
-                if constexpr (has_foreach_c<T>) {
-                    m.foreach([&](const auto &k, const auto &v) {
-                        _it = fmt::format_to(_it, "{:{}}", "", _depth * shift);
-                        process_map_item(k, v);
-                        _it = fmt::format_to(_it, "\n");
-                    });
-                } else if constexpr (std::ranges::range<T>) {
-                    for (const auto &[k, v]: m) {
-                        _it = fmt::format_to(_it, "{:{}}", "", _depth * shift);
-                        process_map_item(k, v);
-                        _it = fmt::format_to(_it, "\n");
-                    }
-                } else {
-                    throw error(fmt::format("process_map does not support type: {}", typeid(decltype(m)).name()));
-                }
-                --_depth;
-                _it = fmt::format_to(_it, "{:{}}", "", _depth * shift);
-            }
-            _it = fmt::format_to(_it, "}}(size: {})\n", m.size());
-        }
-
-        void process_array(const auto &arr, const size_t min_sz=0, const size_t max_sz=std::numeric_limits<size_t>::max())
-        {
-            (void)min_sz;
-            (void)max_sz;
-            _it = fmt::format_to(_it, "{:{}}[", "", _depth * shift);
-            if (!arr.empty()) {
-                ++_depth;
-                _it = fmt::format_to(_it, "\n");
-                for (const auto &v: arr) {
-                    _it = fmt::format_to(_it, "{:{}}", "", _depth * shift);
-                    format(v);
-                    _it = fmt::format_to(_it, "\n");
-                }
-                --_depth;
-                _it = fmt::format_to(_it, "{:{}}", "", _depth * shift);
-            }
-            _it = fmt::format_to(_it, "](size: {})\n", arr.size());
-        }
-
-        void process_array_fixed(const auto &self)
-        {
-            process_array(self);
-        }
-
-        template<typename T>
-        void process_variant(const T &val, const codec::variant_names_t<T> &names)
-        {
-            std::visit([&](const auto &vv) {
-                process(names.at(val.index()), vv);
-            }, val);
+            }, av.val);
         }
 
         OUT_IT it() const
@@ -269,7 +284,7 @@ namespace turbo::codec {
 }
 
 namespace fmt {
-    template<turbo::codec::serializable_c T>
+    template<turbo::codec::archive_formattable_c T>
     struct formatter<T>: formatter<std::string_view> {
         template<typename FormatContext>
         auto format(const T &v, FormatContext &ctx) const -> decltype(ctx.out())
