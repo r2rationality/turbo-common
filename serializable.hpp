@@ -134,6 +134,19 @@ namespace turbo::codec {
             { T::config().val_name } -> std::convertible_to<std::string_view>;
         };
 
+    template<bounded_range_c T>
+    void check_bounds(const size_t sz)
+    {
+        if (!(static_cast<int>(sz >= T::min_size) & static_cast<int>(sz <= T::max_size))) [[unlikely]]
+            throw error(fmt::format("array size {} is out of allowed bounds: [{}, {}]", sz, T::min_size, T::max_size));
+    }
+
+    template<bounded_range_c T>
+    void check_bounds(const T &val)
+    {
+        check_bounds<T>(val.size());
+    }
+
     template<typename T>
     struct as_variant_t {
         T &val;
@@ -195,10 +208,8 @@ namespace turbo::codec {
                     _it = fmt::format_to(_it, "std::nullopt");
                 }
             } else if constexpr (fixed_array_like_c<T> || bounded_range_c<T>) {
-                if constexpr (bounded_range_c<T>) {
-                    if (!(static_cast<int>(val.size() >= T::min_size) & static_cast<int>(val.size() <= T::max_size))) [[unlikely]]
-                        throw error(fmt::format("array size {} is out of allowed bounds: [{}, {}]", val.size(), T::min_size, T::max_size));
-                }
+                if constexpr (bounded_range_c<T>)
+                    check_bounds(val);
                 _it = fmt::format_to(_it, "[\n");
                 ++_depth;
                 for (const auto &v: val) {
@@ -249,7 +260,6 @@ namespace turbo::codec {
 
         void process(const auto &val)
         {
-            //_it = fmt::format_to(_it, "{:{}}", "", _depth * shift);
             format(val);
         }
 
