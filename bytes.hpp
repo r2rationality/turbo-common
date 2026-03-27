@@ -114,10 +114,6 @@ namespace turbo {
             return std::strong_ordering::equal == (*this <=> o);
         }
 
-        explicit operator bool() const noexcept {
-            return !empty();
-        }
-
         uint8_t at(const size_t off) const
         {
             if (off < size()) [[likely]]
@@ -360,11 +356,6 @@ namespace turbo {
         bool operator==(const buffer &o) const noexcept
         {
             return std::strong_ordering::equal == (*this <=> o);
-        }
-
-        explicit operator bool() const noexcept
-        {
-            return !empty();
         }
     };
 
