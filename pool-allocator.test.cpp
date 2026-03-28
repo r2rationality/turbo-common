@@ -19,7 +19,7 @@ suite turbo_common_pool_allocator_suite = [] {
                 expect(!known.contains(ptr));
                 known.emplace(ptr);
             }
-            expect_equal(batch_size * 2, known.size());
+            expect_equal(size_t{batch_size * 2U}, known.size());
             for (auto &ptr: known)
                 alloc.deallocate(ptr);
             for (size_t i = 0; i < batch_size * 2; ++i) {
@@ -58,7 +58,7 @@ suite turbo_common_pool_allocator_suite = [] {
             };
             pool_allocator_t<throws_on_construct, 4, true> alloc {};
             expect(throws([&] { alloc.make_ptr(); }));
-            expect_equal(1, alloc.free_count()); // slot was returned
+            expect_equal(size_t{1}, alloc.free_count()); // slot was returned
         };
 
         "multi-arena"_test = [] {
@@ -69,7 +69,7 @@ suite turbo_common_pool_allocator_suite = [] {
             for (size_t i = 0; i < batch_size * 3; ++i)
                 ptrs.emplace(alloc.allocate());
             // all pointers must be unique and non-null
-            expect_equal(batch_size * 3, ptrs.size());
+            expect_equal(size_t{batch_size * 3U}, ptrs.size());
         };
     };
 };
