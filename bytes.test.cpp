@@ -149,7 +149,9 @@ suite turbo_common_bytes_suite = [] {
         };
         "secure_array"_test = [] {
             using my_sec_array_t = secure_byte_array<4>;
-            using my_sec_storage_t = std::aligned_storage<sizeof(my_sec_array_t), alignof(my_sec_array_t)>::type;
+            struct my_sec_storage_t {
+                alignas(my_sec_array_t) std::byte data[sizeof(my_sec_array_t)];
+            };
             const auto empty = byte_array<4>::from_hex("00000000");
             const auto filled = byte_array<4>::from_hex("DEADBEAF");
             my_sec_storage_t storage {};
