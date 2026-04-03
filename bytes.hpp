@@ -4,7 +4,9 @@
 
 #include <algorithm>
 #include <array>
+#include <concepts>
 #include <span>
+#include <utility>
 #include "error.hpp"
 #include "format.hpp"
 
@@ -367,26 +369,33 @@ namespace turbo {
         using buffer::buffer;
     };
 
-    inline std::pmr::vector<uint8_t> &operator<<(std::pmr::vector<uint8_t> &v, const buffer buf)
+    template<typename V>
+    concept byte_append_container =
+        std::same_as<typename V::value_type, uint8_t> &&
+        requires(V v, const uint8_t b, const buffer buf) {
+            { v.size() } -> std::convertible_to<size_t>;
+            v.insert(v.end(), buf.begin(), buf.end());
+            v.emplace_back(b);
+        };
+
+    template<byte_append_container V>
+    V &append_bytes(V &v, const buffer &buf)
     {
-        const size_t end_off = v.size();
-        v.resize(end_off + buf.size());
-        memcpy(v.data() + end_off, buf.data(), buf.size());
+        v.insert(v.end(), buf.begin(), buf.end());
         return v;
     }
 
-    inline uint8_vector &operator<<(uint8_vector &v, const uint8_t b)
+    template<byte_append_container V>
+    V &operator<<(V &v, const uint8_t b)
     {
-        v.push_back(b);
+        v.emplace_back(b);
         return v;
     }
 
-    inline uint8_vector &operator<<(uint8_vector &v, const buffer buf)
+    template<byte_append_container V>
+    V &operator<<(V &v, const buffer &buf)
     {
-        const size_t end_off = v.size();
-        v.resize(end_off + buf.size());
-        memcpy(v.data() + end_off, buf.data(), buf.size());
-        return v;
+        return append_bytes(v, buf);
     }
 }
 
