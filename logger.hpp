@@ -73,12 +73,13 @@ namespace turbo::logger {
     using action = std::function<void()>;
     using optional_action = std::optional<action>;
 
-    inline std::exception_ptr run_log_errors(const action &main, const optional_action &cleanup={},
+    template<typename F, typename C=std::nullptr_t>
+    inline std::exception_ptr run_log_errors(F &&main, const std::optional<C> &cleanup={},
             const std::source_location &loc=std::source_location::current())
     {
         std::exception_ptr cur_ex{};
         try {
-            main();
+            std::forward<F>(main)();
         } catch (const std::exception &ex) {
             cur_ex = std::current_exception();
             error("block at {}:{} failed with std::exception: {}", loc.file_name(), loc.line(), ex.what());
@@ -86,15 +87,18 @@ namespace turbo::logger {
             cur_ex = std::current_exception();
             error("block at {}:{} failed with an unknown error", loc.file_name(), loc.line());
         }
-        if (cleanup)
-            (*cleanup)();
+        if constexpr (!std::is_null_pointer_v<C>) {
+            if (cleanup)
+                (*cleanup)();
+        }
         return cur_ex;
     }
 
-    inline void run_log_errors_rethrow(const action &main, const optional_action &cleanup={},
-        const std::source_location &loc=std::source_location::current())
+    template<typename F, typename C=std::nullptr_t>
+    inline void run_log_errors_rethrow(F &&main, const std::optional<C> &cleanup={},
+            const std::source_location &loc=std::source_location::current())
     {
-        if (const auto cur_ex = run_log_errors(main, cleanup, loc))
+        if (const auto cur_ex = run_log_errors(std::forward<F>(main), cleanup, loc))
             std::rethrow_exception(cur_ex);
     }
 }
