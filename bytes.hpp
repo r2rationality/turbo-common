@@ -1,6 +1,6 @@
 #pragma once
 /* Copyright (c) 2022-2023 Alex Sierkov (alex dot sierkov at gmail dot com)
- * Copyright (c) 2024-2025 R2 Rationality OÜ (info at r2rationality dot com) */
+ * Copyright (c) 2024-2026 R2 Rationality OÜ (info at r2rationality dot com) */
 
 #include <algorithm>
 #include <array>
@@ -365,6 +365,74 @@ namespace turbo {
     static_assert(std::is_constructible_v<buffer, uint8_vector>);
     static_assert(std::is_convertible_v<uint8_vector, buffer>);
 
+    struct uninitialized_bytes_t {
+        uninitialized_bytes_t(const uninitialized_bytes_t &) = delete;
+        uninitialized_bytes_t &operator=(const uninitialized_bytes_t &) = delete;
+
+        uninitialized_bytes_t() = default;
+
+        explicit uninitialized_bytes_t(const size_t size):
+            _size{size},
+            _ptr{_size ? _alloc().allocate(size) : nullptr}
+        {
+        }
+
+        uninitialized_bytes_t(uninitialized_bytes_t &&o) noexcept:
+            _size{o._size},
+            _ptr{o._ptr}
+        {
+            o._size = 0;
+            o._ptr = nullptr;
+        }
+
+        uninitialized_bytes_t &operator=(uninitialized_bytes_t &&o) noexcept {
+            if (this != &o) [[likely]] {
+                if (_ptr)
+                    _alloc().deallocate(_ptr, _size);
+                _size = o._size;
+                _ptr = o._ptr;
+                o._size = 0;
+                o._ptr = nullptr;
+            }
+            return *this;
+        }
+
+        ~uninitialized_bytes_t() {
+            if (_ptr)
+                _alloc().deallocate(_ptr, _size);
+        }
+
+        [[nodiscard]] size_t size() const noexcept {
+            return _size;
+        }
+
+        [[nodiscard]] std::span<uint8_t> bytes() noexcept {
+            return {_ptr, _size};
+        }
+
+        [[nodiscard]] uint8_t *data() noexcept {
+            return _ptr;
+        }
+
+        [[nodiscard]] const uint8_t *data() const noexcept {
+            return _ptr;
+        }
+
+        operator buffer() const noexcept {
+            return {_ptr, _size};
+        }
+    private:
+        size_t _size = 0;
+        uint8_t *_ptr = nullptr;
+
+        static std::allocator<uint8_t> &_alloc() noexcept {
+            static std::allocator<uint8_t> alloc{};
+            return alloc;
+        }
+    };
+
+    static_assert(std::is_convertible_v<uninitialized_bytes_t, buffer>);
+
     struct buffer_lowercase: buffer {
         using buffer::buffer;
     };
@@ -414,6 +482,10 @@ namespace fmt {
 
     template<>
     struct formatter<turbo::uint8_vector>: formatter<turbo::buffer> {
+    };
+
+    template<>
+    struct formatter<turbo::uninitialized_bytes_t>: formatter<turbo::buffer> {
     };
 
     template<>
