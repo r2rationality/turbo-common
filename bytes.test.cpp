@@ -222,18 +222,14 @@ suite turbo_common_bytes_suite = [] {
         };
         "secure_array"_test = [] {
             using my_sec_array_t = secure_byte_array<4>;
-            struct my_sec_storage_t {
-                alignas(my_sec_array_t) std::byte data[sizeof(my_sec_array_t)];
-            };
             const auto empty = byte_array<4>::from_hex("00000000");
             const auto filled = byte_array<4>::from_hex("DEADBEAF");
-            my_sec_storage_t storage {};
-            my_sec_array_t *sec = new (&storage) my_sec_array_t { filled };
-            const auto *data_ptr = sec->data();
-            expect_equal(true, memcmp(data_ptr, filled.data(), filled.size()) == 0);
+            alignas(my_sec_array_t) uint8_t storage[sizeof(my_sec_array_t)] {};
+            my_sec_array_t *sec = new (storage) my_sec_array_t { filled };
+            expect_equal(true, memcmp(storage, filled.data(), filled.size()) == 0);
             sec->~secure_byte_array();
-            expect_equal(false, memcmp(data_ptr, filled.data(), filled.size()) == 0);
-            expect_equal(true, memcmp(data_ptr, empty.data(), empty.size()) == 0);
+            expect_equal(false, memcmp(storage, filled.data(), filled.size()) == 0);
+            expect_equal(true, memcmp(storage, empty.data(), empty.size()) == 0);
         };
     };  
 };
