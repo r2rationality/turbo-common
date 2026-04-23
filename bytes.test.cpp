@@ -1,6 +1,7 @@
 /* Copyright (c) 2022-2023 Alex Sierkov (alex dot sierkov at gmail dot com)
  * Copyright (c) 2024-2026 R2 Rationality OÜ (info at r2rationality dot com) */
 
+#include <algorithm>
 #include <numeric>
 #include "bytes.hpp"
 #include "test.hpp"
@@ -226,10 +227,11 @@ suite turbo_common_bytes_suite = [] {
             const auto filled = byte_array<4>::from_hex("DEADBEAF");
             alignas(my_sec_array_t) uint8_t storage[sizeof(my_sec_array_t)] {};
             my_sec_array_t *sec = new (storage) my_sec_array_t { filled };
-            expect_equal(true, memcmp(storage, filled.data(), filled.size()) == 0);
+            const auto storage_bytes = std::span{storage}.first(filled.size());
+            expect_equal(true, std::ranges::equal(storage_bytes, filled));
             sec->~secure_byte_array();
-            expect_equal(false, memcmp(storage, filled.data(), filled.size()) == 0);
-            expect_equal(true, memcmp(storage, empty.data(), empty.size()) == 0);
+            expect_equal(false, std::ranges::equal(storage_bytes, filled));
+            expect_equal(true, std::ranges::equal(storage_bytes, empty));
         };
     };  
 };
