@@ -228,10 +228,14 @@ suite turbo_common_bytes_suite = [] {
             alignas(my_sec_array_t) uint8_t storage[sizeof(my_sec_array_t)] {};
             my_sec_array_t *sec = new (storage) my_sec_array_t { filled };
             const auto storage_bytes = std::span{storage}.first(filled.size());
-            expect_equal(true, std::ranges::equal(storage_bytes, filled));
+            const auto byte_equal = [](const uint8_t &a, const uint8_t &b) {
+                const volatile uint8_t &volatile_a = a;
+                return volatile_a == b;
+            };
+            expect_equal(true, std::ranges::equal(storage_bytes, filled, byte_equal));
             sec->~secure_byte_array();
-            expect_equal(false, std::ranges::equal(storage_bytes, filled));
-            expect_equal(true, std::ranges::equal(storage_bytes, empty));
+            expect_equal(false, std::ranges::equal(storage_bytes, filled, byte_equal));
+            expect_equal(true, std::ranges::equal(storage_bytes, empty, byte_equal));
         };
     };  
 };
