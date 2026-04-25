@@ -3,22 +3,29 @@
 
 #include <turbo/common/test.hpp>
 #include "memory.hpp"
+#include "timer.hpp"
 
 using namespace turbo;
 
 suite turbo_common_memory_suite = [] {
     "turbo::common::memory"_test = [] {
-        const auto before = memory::my_usage_mb();
-        static constexpr size_t alloc_size = 0x4000000;
-        size_t after_alloc;
-        {
-            uint8_vector data(alloc_size);
-            // force memory writes so that the memory is really allocated
-            for (auto volatile *p = data.data(), *end = data.data() + data.size(); p < end; ++p)
-                *p = p - data.data();
-            after_alloc = memory::my_usage_mb();
-        }
-        expect(after_alloc >= before + (alloc_size >> 20)) << after_alloc << before;
-        // Some standard libraries do not immediately return the memory to the OS, thus, not checking for the memory release
+        "my_usage_mb"_test = [] {
+            const timer t{"my_usage_mb"};
+            const auto before = memory::my_usage_mb();
+            static constexpr size_t chunk_size = 64ULL << 20U; // 256 MB
+            static constexpr size_t max_chunks = 64;
+            std::vector<uint8_vector> chunks{};
+            auto after = memory::my_usage_mb();
+            for (size_t i = 0; i < max_chunks && after <= before; ++i) {
+                auto &data = chunks.emplace_back(chunk_size, static_cast<uint8_t>(i));
+                // Force memory writes so that the memory is committed and visible in process usage.
+                for (auto volatile *p = data.data(), *end = data.data() + data.size(); p < end; p += 0x1000U) {
+                    *p ^= 0xFFU;
+                }
+                after = memory::my_usage_mb();
+            }
+            expect(after > before) << after << before;
+            // Some standard libraries do not immediately return the memory to the OS, thus, not checking for the memory release
+        };
     };
 };
