@@ -8,6 +8,19 @@
 
 namespace {
     using namespace turbo;
+    
+#if defined(__GNUC__)
+    [[gnu::noinline]]
+#endif
+    bool bytes_equal_volatile(const uint8_t *data, const uint8_t *expected, const size_t size)
+    {
+        const volatile uint8_t *volatile_data = data;
+        for (size_t i = 0; i < size; ++i) {
+            if (volatile_data[i] != expected[i])
+                return false;
+        }
+        return true;
+    }
 }
 
 suite turbo_common_bytes_suite = [] {
@@ -228,14 +241,10 @@ suite turbo_common_bytes_suite = [] {
             alignas(my_sec_array_t) uint8_t storage[sizeof(my_sec_array_t)] {};
             my_sec_array_t *sec = new (storage) my_sec_array_t { filled };
             const auto storage_bytes = std::span{storage}.first(filled.size());
-            const auto byte_equal = [](const uint8_t &a, const uint8_t &b) {
-                const volatile uint8_t &volatile_a = a;
-                return volatile_a == b;
-            };
-            expect_equal(true, std::ranges::equal(storage_bytes, filled, byte_equal));
+            expect_equal(true, bytes_equal_volatile(storage_bytes.data(), filled.data(), filled.size()));
             sec->~secure_byte_array();
-            expect_equal(false, std::ranges::equal(storage_bytes, filled, byte_equal));
-            expect_equal(true, std::ranges::equal(storage_bytes, empty, byte_equal));
+            expect_equal(false, bytes_equal_volatile(storage_bytes.data(), filled.data(), filled.size()));
+            expect_equal(true, bytes_equal_volatile(storage_bytes.data(), empty.data(), empty.size()));
         };
     };  
 };
