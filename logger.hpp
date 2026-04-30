@@ -24,13 +24,14 @@
 namespace turbo::logger {
     using level = spdlog::level::level_enum;
 
-    extern std::string log_path();
+    extern std::string &init_log_path(std::optional<std::string_view> path={});
+
     extern bool &tracing_enabled();
     extern spdlog::logger create(const std::string &path);
 
     inline spdlog::logger &get()
     {
-        static spdlog::logger logger = create(log_path());
+        static spdlog::logger logger = create(init_log_path());
         return logger;
     }
 
@@ -74,7 +75,7 @@ namespace turbo::logger {
     using optional_action = std::optional<action>;
 
     template<typename F, typename C=std::nullptr_t>
-    inline std::exception_ptr run_log_errors(F &&main, const std::optional<C> &cleanup={},
+    std::exception_ptr run_log_errors(F &&main, const std::optional<C> &cleanup={},
             const std::source_location &loc=std::source_location::current())
     {
         std::exception_ptr cur_ex{};
@@ -95,7 +96,7 @@ namespace turbo::logger {
     }
 
     template<typename F, typename C=std::nullptr_t>
-    inline void run_log_errors_rethrow(F &&main, const std::optional<C> &cleanup={},
+    void run_log_errors_rethrow(F &&main, const std::optional<C> &cleanup={},
             const std::source_location &loc=std::source_location::current())
     {
         if (const auto cur_ex = run_log_errors(std::forward<F>(main), cleanup, loc))
