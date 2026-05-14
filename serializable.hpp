@@ -266,8 +266,13 @@ namespace turbo::codec {
         void process(const std::string_view name, const auto &val)
         {
             _it = fmt::format_to(_it, "{:{}}", "", _depth * shift);
-            _it = fmt::format_to(_it, "{}: ", name);
+            _it = fmt::format_to(_it, "{}:", name);
             ++_depth;
+            if constexpr (_multiline_value<std::remove_cvref_t<decltype(val)>>) {
+                _it = fmt::format_to(_it, "\n{:{}}", "", _depth * shift);
+            } else {
+                _it = fmt::format_to(_it, " ");
+            }
             format(val);
             --_depth;
             _it = fmt::format_to(_it, "\n");
@@ -288,6 +293,12 @@ namespace turbo::codec {
             return _it;
         }
     private:
+        template<typename T>
+        static constexpr bool _multiline_value = serializable_c<T>
+            || fixed_array_like_c<T>
+            || bounded_range_c<T>
+            || map_like_c<T>;
+
         OUT_IT _it;
         size_t _depth = 0;
     };
