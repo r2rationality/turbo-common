@@ -121,7 +121,7 @@ suite turbo_common_serializable_suite = [] {
                 "    y: 2\n"
                 "    x: 3\n"
                 "    y: 4\n"
-                "](size: 2)\n"
+                "](size: 2)"
             }, out);
         };
         "formatter::map"_test = [] {
@@ -132,7 +132,7 @@ suite turbo_common_serializable_suite = [] {
                 "values: {\n"
                 "    1: 2\n"
                 "    3: 4\n"
-                "}(size: 2)\n"
+                "}(size: 2)"
             }, out);
         };
     };

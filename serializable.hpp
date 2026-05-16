@@ -279,8 +279,10 @@ namespace turbo::codec {
             if constexpr (_collection_value<value_type>) {
                 _it = fmt::format_to(_it, " ");
                 format(val);
-                _it = fmt::format_to(_it, "\n");
-                _ends_with_newline = true;
+                if (_depth > 0) {
+                    _it = fmt::format_to(_it, "\n");
+                    _ends_with_newline = true;
+                }
             } else {
                 ++_depth;
                 if constexpr (_multiline_value<value_type>) {
