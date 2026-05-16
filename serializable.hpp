@@ -173,7 +173,7 @@ namespace turbo::codec {
 
     template<typename OUT_IT>
     struct formatter: archive_t {
-        static constexpr size_t shift = 2;
+        static constexpr size_t shift = 4;
 
         explicit formatter(OUT_IT it):
             _it { std::move(it) }
@@ -194,11 +194,9 @@ namespace turbo::codec {
         void format(const T &val)
         {
             if constexpr (serializable_c<T>) {
-                ++_depth;
                 // serialize() is intentionally non-const across the codebase (it's used for both
                 // encoding and decoding); const_cast is safe here as format() only reads via the archive
                 const_cast<T &>(val).serialize(*this);
-                --_depth;
             }  else if constexpr (varlen_uint_c<T>) {
                 _it = fmt::format_to(_it, "{}", val.value());
             } else if constexpr (optional_like_c<T>) {
@@ -213,9 +211,13 @@ namespace turbo::codec {
                 _it = fmt::format_to(_it, "[\n");
                 ++_depth;
                 for (const auto &v: val) {
-                    _it = fmt::format_to(_it, "{:{}}", "", _depth * shift);
-                    format(v);
-                    _it = fmt::format_to(_it, "\n");
+                    if constexpr (_multiline_value<std::remove_cvref_t<decltype(v)>>) {
+                        format(v);
+                    } else {
+                        _it = fmt::format_to(_it, "{:{}}", "", _depth * shift);
+                        format(v);
+                        _it = fmt::format_to(_it, "\n");
+                    }
                 }
                 --_depth;
                 _it = fmt::format_to(_it, "{:{}}](size: {})", "", _depth * shift, val.size());
@@ -267,15 +269,22 @@ namespace turbo::codec {
         {
             _it = fmt::format_to(_it, "{:{}}", "", _depth * shift);
             _it = fmt::format_to(_it, "{}:", name);
-            ++_depth;
-            if constexpr (_multiline_value<std::remove_cvref_t<decltype(val)>>) {
-                _it = fmt::format_to(_it, "\n{:{}}", "", _depth * shift);
-            } else {
+            using value_type = std::remove_cvref_t<decltype(val)>;
+            if constexpr (_collection_value<value_type>) {
                 _it = fmt::format_to(_it, " ");
+                format(val);
+                _it = fmt::format_to(_it, "\n");;
+            } else {
+                ++_depth;
+                if constexpr (_multiline_value<value_type>) {
+                    _it = fmt::format_to(_it, "\n");
+                } else {
+                    _it = fmt::format_to(_it, " ");
+                }
+                format(val);
+                --_depth;
+                _it = fmt::format_to(_it, "\n");
             }
-            format(val);
-            --_depth;
-            _it = fmt::format_to(_it, "\n");
         }
 
         template<typename T>
@@ -296,6 +305,11 @@ namespace turbo::codec {
         template<typename T>
         static constexpr bool _multiline_value = serializable_c<T>
             || fixed_array_like_c<T>
+            || bounded_range_c<T>
+            || map_like_c<T>;
+
+        template<typename T>
+        static constexpr bool _collection_value = fixed_array_like_c<T>
             || bounded_range_c<T>
             || map_like_c<T>;
 

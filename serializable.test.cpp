@@ -32,6 +32,49 @@ namespace {
             archive.process("b", b);
         }
     };
+
+    struct point_array_t: std::array<point_t, 2> {
+        static constexpr bool is_element_sequence = true;
+    };
+
+    struct points_t {
+        point_array_t values{};
+
+        void serialize(auto &archive)
+        {
+            archive.process("values", values);
+        }
+    };
+
+    struct value_map_t {
+        using key_type = uint32_t;
+        using mapped_type = uint32_t;
+
+        struct config_t {
+            std::string_view key_name = "key";
+            std::string_view val_name = "value";
+        };
+
+        static config_t config()
+        {
+            return {};
+        }
+
+        std::array<std::pair<uint32_t, uint32_t>, 2> values{};
+
+        auto begin() const { return values.begin(); }
+        auto end() const { return values.end(); }
+        size_t size() const { return values.size(); }
+    };
+
+    struct mapped_t {
+        value_map_t values{};
+
+        void serialize(auto &archive)
+        {
+            archive.process("values", values);
+        }
+    };
 }
 
 suite turbo_common_serializable_suite = [] {
@@ -51,16 +94,48 @@ suite turbo_common_serializable_suite = [] {
         "formatter::serializable"_test = [] {
             point_t p{3, 7};
             const auto out = fmt::format("{}", p);
-            expect(out.find("x: 3") != std::string::npos) << out;
-            expect(out.find("y: 7") != std::string::npos) << out;
+            expect_equal(std::string{
+                "x: 3\n"
+                "y: 7\n"
+            }, out);
         };
         "formatter::nested"_test = [] {
             line_t l{{ 1, 2 }, { 3, 4 }};
             const auto out = fmt::format("{}", l);
-            expect(out.find("a:") != std::string::npos) << out;
-            expect(out.find("b:") != std::string::npos) << out;
-            expect(out.find("x: 1") != std::string::npos) << out;
-            expect(out.find("x: 3") != std::string::npos) << out;
+            expect_equal(std::string{
+                "a:\n"
+                "    x: 1\n"
+                "    y: 2\n"
+                "\n"
+                "b:\n"
+                "    x: 3\n"
+                "    y: 4\n"
+                "\n"
+            }, out);
+        };
+        "formatter::sequence"_test = [] {
+            points_t p{};
+            p.values = point_array_t{{ point_t{1, 2}, point_t{3, 4} }};
+            const auto out = fmt::format("{}", p);
+            expect_equal(std::string{
+                "values: [\n"
+                "    x: 1\n"
+                "    y: 2\n"
+                "    x: 3\n"
+                "    y: 4\n"
+                "](size: 2)\n"
+            }, out);
+        };
+        "formatter::map"_test = [] {
+            mapped_t m{};
+            m.values.values = {{ std::pair{1U, 2U}, std::pair{3U, 4U} }};
+            const auto out = fmt::format("{}", m);
+            expect_equal(std::string{
+                "values: {\n"
+                "    1: 2\n"
+                "    3: 4\n"
+                "}(size: 2)\n"
+            }, out);
         };
     };
 };
