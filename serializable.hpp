@@ -199,11 +199,13 @@ namespace turbo::codec {
                 const_cast<T &>(val).serialize(*this);
             }  else if constexpr (varlen_uint_c<T>) {
                 _it = fmt::format_to(_it, "{}", val.value());
+                _ends_with_newline = false;
             } else if constexpr (optional_like_c<T>) {
                 if (val) {
                     format(*val);
                 } else {
                     _it = fmt::format_to(_it, "std::nullopt");
+                    _ends_with_newline = false;
                 }
             } else if constexpr (fixed_array_like_c<T> || bounded_range_c<T>) {
                 if constexpr (bounded_range_c<T>)
@@ -221,6 +223,7 @@ namespace turbo::codec {
                 }
                 --_depth;
                 _it = fmt::format_to(_it, "{:{}}](size: {})", "", _depth * shift, val.size());
+                _ends_with_newline = false;
             } else if constexpr (map_like_c<T>) {
                 _it = fmt::format_to(_it, "{{\n");
                 ++_depth;
@@ -243,8 +246,10 @@ namespace turbo::codec {
                 }
                 --_depth;
                 _it = fmt::format_to(_it, "{:{}}}}(size: {})", "", _depth * shift, val.size());
+                _ends_with_newline = false;
             } else if constexpr (byte_array_like_c<T> || byte_sequence_like_c<T>) {
                 _it = fmt::format_to(_it, "{}", std::span<const uint8_t>{val.data(), val.size()});
+                _ends_with_newline = false;
             } else if constexpr (std::is_same_v<T, uint8_t>
                     || std::is_same_v<T, uint16_t>
                     || std::is_same_v<T, uint32_t>
@@ -255,6 +260,7 @@ namespace turbo::codec {
                     || std::is_same_v<T, std::string>
                     || std::is_convertible_v<T, std::span<const uint8_t>>) {
                 _it = fmt::format_to(_it, "{}", val);
+                _ends_with_newline = false;
             } else {
                 throw error(fmt::format("formatter serialization is not enabled for type {}", typeid(T).name()));
             }
@@ -273,7 +279,8 @@ namespace turbo::codec {
             if constexpr (_collection_value<value_type>) {
                 _it = fmt::format_to(_it, " ");
                 format(val);
-                _it = fmt::format_to(_it, "\n");;
+                _it = fmt::format_to(_it, "\n");
+                _ends_with_newline = true;
             } else {
                 ++_depth;
                 if constexpr (_multiline_value<value_type>) {
@@ -283,7 +290,13 @@ namespace turbo::codec {
                 }
                 format(val);
                 --_depth;
-                _it = fmt::format_to(_it, "\n");
+                if constexpr (serializable_c<value_type>) {
+                    _ends_with_newline = true;
+                } else {
+                    if (!_ends_with_newline)
+                        _it = fmt::format_to(_it, "\n");
+                    _ends_with_newline = true;
+                }
             }
         }
 
@@ -315,6 +328,7 @@ namespace turbo::codec {
 
         OUT_IT _it;
         size_t _depth = 0;
+        bool _ends_with_newline = false;
     };
 }
 

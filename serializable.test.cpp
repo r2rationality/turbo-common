@@ -106,11 +106,9 @@ suite turbo_common_serializable_suite = [] {
                 "a:\n"
                 "    x: 1\n"
                 "    y: 2\n"
-                "\n"
                 "b:\n"
                 "    x: 3\n"
                 "    y: 4\n"
-                "\n"
             }, out);
         };
         "formatter::sequence"_test = [] {
