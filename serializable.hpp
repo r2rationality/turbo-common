@@ -81,6 +81,13 @@ namespace turbo::codec {
         { t.serialize(a) } -> std::same_as<void>;
     };
 
+    template<typename T>
+    concept single_line_serializable_c = serializable_c<T>
+        && requires {
+            { T::single_line_serialization } -> std::convertible_to<bool>;
+        }
+        && T::single_line_serialization;
+
     // Structural byte-buffer concepts. The !serializable_c guard prevents false matches on
     // sequence_t<uint8_t,N> or fixed_sequence_t<uint8_t,N>, which are structurally identical
     // but have a serialize() that encodes elements individually rather than as a raw blob.
@@ -292,13 +299,9 @@ namespace turbo::codec {
                 }
                 format(val);
                 --_depth;
-                if constexpr (serializable_c<value_type>) {
-                    _ends_with_newline = true;
-                } else {
-                    if (!_ends_with_newline)
-                        _it = fmt::format_to(_it, "\n");
-                    _ends_with_newline = true;
-                }
+                if (!_ends_with_newline)
+                    _it = fmt::format_to(_it, "\n");
+                _ends_with_newline = true;
             }
         }
 
@@ -318,7 +321,7 @@ namespace turbo::codec {
         }
     private:
         template<typename T>
-        static constexpr bool _multiline_value = serializable_c<T>
+        static constexpr bool _multiline_value = (serializable_c<T> && !single_line_serializable_c<T>)
             || fixed_array_like_c<T>
             || bounded_range_c<T>
             || map_like_c<T>;

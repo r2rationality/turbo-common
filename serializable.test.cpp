@@ -22,6 +22,28 @@ namespace {
         int val = 0;
     };
 
+    struct scalar_wrapper_t {
+        static constexpr bool single_line_serialization = true;
+
+        uint32_t val = 0;
+
+        void serialize(auto &archive)
+        {
+            archive.process(val);
+        }
+    };
+
+    struct scalar_wrapper_line_t {
+        scalar_wrapper_t a{};
+        scalar_wrapper_t b{};
+
+        void serialize(auto &archive)
+        {
+            archive.process("a", a);
+            archive.process("b", b);
+        }
+    };
+
     struct line_t {
         point_t a{};
         point_t b{};
@@ -83,6 +105,7 @@ suite turbo_common_serializable_suite = [] {
             expect(serializable_c<point_t>);
             expect(!serializable_c<plain_t>);
             expect(!serializable_c<uint32_t>);
+            expect(single_line_serializable_c<scalar_wrapper_t>);
             expect(not_serializable_c<plain_t>);
         };
         "formatter::scalar"_test = [] {
@@ -97,6 +120,14 @@ suite turbo_common_serializable_suite = [] {
             expect_equal(std::string{
                 "x: 3\n"
                 "y: 7\n"
+            }, out);
+        };
+        "formatter::single_line_serializable"_test = [] {
+            scalar_wrapper_line_t l{{ 11 }, { 22 }};
+            const auto out = fmt::format("{}", l);
+            expect_equal(std::string{
+                "a: 11\n"
+                "b: 22\n"
             }, out);
         };
         "formatter::nested"_test = [] {
