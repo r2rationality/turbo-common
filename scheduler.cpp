@@ -112,6 +112,7 @@ namespace turbo {
                 }
             }
             _tasks = std::move(new_tasks);
+            _finish_tasks(num_cancelled);
             // no need to notify since cancel does not add new tasks
             return num_cancelled;
         }
@@ -125,6 +126,10 @@ namespace turbo {
                 ++it->second.queued;
             }
             _tasks.emplace(std::move(task));
+            {
+                mutex::scoped_lock process_lock { _process_mutex };
+                _num_outstanding.fetch_add(1, std::memory_order_relaxed);
+            }
             tasks_lock.unlock();
             _tasks_cv.notify_one();
         }
@@ -331,6 +336,10 @@ namespace turbo {
         task_queue _tasks {};
         task_stats_map _task_stats {};
 
+        mutable mutex::unique_lock::mutex_type _process_mutex alignas(mutex::alignment) {};
+        std::condition_variable_any _process_cv alignas(mutex::alignment) {};
+        std::atomic_size_t _num_outstanding = 0;
+
         using observer_map = std::unordered_map<std::string, error_observer_t>;
         mutable mutex::unique_lock::mutex_type _observers_mutex alignas(mutex::alignment) {};
         observer_map _observers {};
@@ -365,6 +374,19 @@ namespace turbo {
             return {};
         }
 
+        void _finish_tasks(const size_t num_tasks=1)
+        {
+            if (num_tasks == 0)
+                return;
+            bool all_done = false;
+            {
+                mutex::scoped_lock process_lock { _process_mutex };
+                all_done = _num_outstanding.fetch_sub(num_tasks, std::memory_order_acq_rel) == num_tasks;
+            }
+            if (all_done)
+                _process_cv.notify_all();
+        }
+
         void _report_status()
         {
             const auto now = std::chrono::system_clock::now();
@@ -372,12 +394,10 @@ namespace turbo {
             if (now >= prev_next_time) {
                 const auto next_next_time = now + default_update_interval;
                 if (_report_next_time.compare_exchange_strong(prev_next_time, next_next_time)) {
-                    size_t num_tasks = 0;
+                    const auto num_tasks = _num_outstanding.load(std::memory_order_relaxed);
                     std::map<std::string, size_t> active_tasks {};
                     {
                         mutex::scoped_lock tasks_lk { _tasks_mutex };
-                        for (const auto &[task_name, stats]: _task_stats)
-                            num_tasks += stats.queued;
                         for (const auto &task_name: _worker_tasks) {
                             if (task_name)
                                 ++active_tasks[*task_name];
@@ -455,6 +475,7 @@ namespace turbo {
                 lock.unlock();
                 if (!prev_task)
                     --_num_active;
+                _finish_tasks();
             }
             return true;
         }
@@ -481,16 +502,20 @@ namespace turbo {
 
         void _process(const bool report_status)
         {
-            for (;;) {
-                {
-                    mutex::scoped_lock tasks_lk { _tasks_mutex };
-                    size_t num_tasks = 0;
-                    for (const auto &[task_name, stats]: _task_stats)
-                        num_tasks += stats.queued;
-                    if (num_tasks == 0 && _num_active.load(std::memory_order_relaxed) == 0)
-                        break;
+            if (_num_workers == 1) {
+                while (_num_outstanding.load(std::memory_order_acquire) != 0)
+                    _process_once(report_status, true, true);
+            } else {
+                mutex::unique_lock process_lock { _process_mutex };
+                while (_num_outstanding.load(std::memory_order_acquire) != 0) {
+                    _process_cv.wait_for(process_lock, default_update_interval, [&] {
+                        return _num_outstanding.load(std::memory_order_acquire) == 0;
+                    });
+                    process_lock.unlock();
+                    if (report_status)
+                        _report_status();
+                    process_lock.lock();
                 }
-                _process_once(report_status, _num_workers == 1, true);
             }
             if (report_status)
                 progress::get().inform();
@@ -539,8 +564,7 @@ namespace turbo {
         _impl->process_once(report_status);
     }
 
-    void scheduler::wait_all(const std::string &task_group, const wait_all_submit_func_t &submit_func,
-        const wait_all_options options)
+    void scheduler::wait_all(const std::string &task_group, const wait_all_submit_func_t &submit_func, const wait_all_options options)
     {
         return _impl->wait_all_done(task_group, submit_func, options);
     }

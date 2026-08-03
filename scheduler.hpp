@@ -51,11 +51,11 @@ namespace turbo {
         }
     };
 
-    struct scheduler {
-        struct wait_all_options {
-            bool report_diagnostics = false;
-        };
+    struct wait_all_options {
+        bool report_diagnostics = false;
+    };
 
+    struct scheduler {
         using task_func_t = std::function<void()>;
         using submit_func_t = std::function<void(scheduled_task)>;
         using todo_count_t = std::shared_ptr<std::atomic_size_t>;
@@ -86,8 +86,7 @@ namespace turbo {
         [[nodiscard]] bool process_ok(bool report_status=true, const std::source_location &loc=std::source_location::current());
         void process(bool report_status=true, const std::source_location &loc=std::source_location::current());
         void process_once(bool report_statues=true);
-        void wait_all(const std::string &task_group, const wait_all_submit_func_t &submit_func,
-            wait_all_options options={});
+        void wait_all(const std::string &task_group, const wait_all_submit_func_t &submit_func, wait_all_options options={});
     private:
         struct impl;
         std::unique_ptr<impl> _impl;

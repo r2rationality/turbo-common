@@ -156,18 +156,21 @@ suite turbo_common_scheduler_suite = [] {
         };
         "wait_for_count"_test = [] {
             scheduler s {};
+            std::atomic_size_t num_completed = 0;
             s.submit("test", 100, [&] {
                 s.wait_all("wait", [&](const auto &, const auto &submit_f) {
-                    submit_f({ 200, "wait", [] {
+                    submit_f({ 200, "wait", [&] {
                         std::this_thread::sleep_for(std::chrono::milliseconds { 500 });
+                        num_completed.fetch_add(1, std::memory_order_relaxed);
                     }});
-                    submit_f({ 300, "wait", [] {
+                    submit_f({ 300, "wait", [&] {
                         std::this_thread::sleep_for(std::chrono::milliseconds { 200 });
+                        num_completed.fetch_add(1, std::memory_order_relaxed);
                     }});
                 });
             });
             s.process();
-            expect(true);
+            expect_equal(2ULL, num_completed.load(std::memory_order_relaxed));
         };
         /*"clear_observers"_test = [] {
             scheduler s {};
