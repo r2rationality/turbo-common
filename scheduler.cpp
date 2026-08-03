@@ -1,10 +1,13 @@
 /* Copyright (c) 2022-2023 Alex Sierkov (alex dot sierkov at gmail dot com)
  * Copyright (c) 2024-2025 R2 Rationality OÜ (info at r2rationality dot com) */
 
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <cstdlib>
+#include <cstdint>
 #include <list>
+#include <memory>
 #include <queue>
 #include <source_location>
 #include <unordered_map>
@@ -189,7 +192,8 @@ namespace turbo {
             _process_once(report_status, false, !_process_running);
         }
 
-        void wait_all_done(const std::string &task_group, const wait_all_submit_func_t &submit_func)
+        void wait_all_done(const std::string &task_group, const wait_all_submit_func_t &submit_func,
+            const wait_all_options options)
         {
             bool exp_false = false;
             if (!_wait_all_done_running.compare_exchange_strong(exp_false, true))
@@ -199,26 +203,49 @@ namespace turbo {
             std::atomic_size_t errors = 0;
             try {
                 static constexpr std::chrono::milliseconds report_period{10000};
-                const auto wait_start = std::chrono::system_clock::now();
+                const auto wait_start = std::chrono::steady_clock::now();
                 auto next_warn = wait_start + report_period;
                 on_error(task_group, [&errors](const auto &) {
                     errors.fetch_add(1, std::memory_order_relaxed);
 ;                }, true);
-                auto todo = std::make_shared<std::atomic<size_t>>(0);
+                const bool collect_diagnostics = options.report_diagnostics;
+                auto state = std::make_shared<wait_all_state>(collect_diagnostics);
+                scheduler::todo_count_t todo { state, &state->todo };
+                const bool caller_is_worker = collect_diagnostics && _get_worker_id().has_value();
+                const auto active_workers_at_start = collect_diagnostics
+                    ? _num_active.load(std::memory_order_relaxed) : size_t { 0 };
+                size_t tracked_task_groups = 0;
+                if (collect_diagnostics) {
+                    mutex::scoped_lock tasks_lock { _tasks_mutex };
+                    tracked_task_groups = _task_stats.size();
+                }
+                size_t num_submitted = 0;
                 submit_func(todo, [&](auto task) {
-                    todo->fetch_add(1, std::memory_order_relaxed);
-                    task.task = [prev_action=task.task, todo] {
+                    ++num_submitted;
+                    state->todo.fetch_add(1, std::memory_order_relaxed);
+                    task.task = [prev_action=task.task, state] {
+                        if (!state->collect_diagnostics) {
+                            prev_action();
+                            state->todo.fetch_sub(1, std::memory_order_relaxed);
+                            return;
+                        }
+                        const auto task_start = std::chrono::steady_clock::now();
                         prev_action();
-                        todo->fetch_sub(1, std::memory_order_relaxed);
+                        state->add(std::chrono::steady_clock::now() - task_start);
+                        state->todo.fetch_sub(1, std::memory_order_acq_rel);
                     };
                     post(std::move(task));
                 });
+                const auto submit_done = collect_diagnostics ? std::chrono::steady_clock::now() : wait_start;
                 const auto process_results = !_process_running.load();
                 for (;;) {
-                    auto num_todo = todo->load(std::memory_order_relaxed) - errors.load(std::memory_order_relaxed);
-                    if (num_todo == 0)
+                    auto num_todo = state->todo.load(std::memory_order_relaxed) - errors.load(std::memory_order_relaxed);
+                    if (num_todo == 0) {
+                        if (collect_diagnostics)
+                            static_cast<void>(state->todo.load(std::memory_order_acquire));
                         break;
-                    if (const auto now = std::chrono::system_clock::now(); now >= next_warn) {
+                    }
+                    if (const auto now = std::chrono::steady_clock::now(); now >= next_warn) {
                         next_warn = now + report_period;
                         logger::warn(
                             "wait_all_done takes longer than expected task: {} todo: {} errors: {} process_results: {} waiting for: {} secs",
@@ -226,6 +253,28 @@ namespace turbo {
                             std::chrono::duration_cast<std::chrono::seconds>(now - wait_start).count());
                     }
                     _process_once(true, false, process_results);
+                }
+                if (collect_diagnostics) {
+                    const auto wait_done = std::chrono::steady_clock::now();
+                    const auto elapsed_seconds = std::chrono::duration<double> { wait_done - wait_start }.count();
+                    const auto submit_ms = std::chrono::duration<double, std::milli> { submit_done - wait_start }.count();
+                    const auto task_wall_seconds = state->total_ns.load(std::memory_order_relaxed) / 1'000'000'000.0;
+                    const auto max_task_ms = state->max_ns.load(std::memory_order_relaxed) / 1'000'000.0;
+                    const auto effective_workers = std::max<size_t>(1, _num_workers - (caller_is_worker ? 1 : 0));
+                    const auto average_concurrency = elapsed_seconds > 0.0 ? task_wall_seconds / elapsed_seconds : 0.0;
+                    const auto parallel_efficiency = elapsed_seconds > 0.0
+                        ? 100.0 * task_wall_seconds / (elapsed_seconds * effective_workers) : 0.0;
+                    const auto mean_task_ms = num_submitted > 0 ? task_wall_seconds * 1000.0 / num_submitted : 0.0;
+                    const auto max_over_mean = mean_task_ms > 0.0 ? max_task_ms / mean_task_ms : 0.0;
+                    logger::debug(
+                        "scheduler wait_all diagnostics group: {} tasks: {} effective_workers: {} active_workers_at_start: {} tracked_task_groups: {} "
+                        "submit_ms: {:.3f} elapsed_ms: {:.3f} "
+                        "task_wall_sum_ms: {:.3f} mean_task_ms: {:.3f} max_task_ms: {:.3f} max_over_mean: {:.2f} "
+                        "average_concurrency: {:.2f} wall_parallel_efficiency: {:.1f}%",
+                        task_group, num_submitted, effective_workers, active_workers_at_start, tracked_task_groups,
+                        submit_ms, elapsed_seconds * 1000.0,
+                        task_wall_seconds * 1000.0, mean_task_ms, max_task_ms, max_over_mean,
+                        average_concurrency, parallel_efficiency);
                 }
                 _wait_all_done_running = false;
             } catch (const std::exception &ex) {
@@ -255,6 +304,27 @@ namespace turbo {
             double cpu_time = 0.0;
         };
         using task_stats_map = std::unordered_map<std::string, task_stat>;
+
+        struct wait_all_state {
+            explicit wait_all_state(const bool collect)
+                : collect_diagnostics { collect }
+            {
+            }
+
+            std::atomic_size_t todo = 0;
+            std::atomic_uint64_t total_ns = 0;
+            std::atomic_uint64_t max_ns = 0;
+            const bool collect_diagnostics;
+
+            void add(const std::chrono::steady_clock::duration duration)
+            {
+                const auto ns = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count());
+                total_ns.fetch_add(ns, std::memory_order_relaxed);
+                auto prev_max = max_ns.load(std::memory_order_relaxed);
+                while (prev_max < ns && !max_ns.compare_exchange_weak(prev_max, ns, std::memory_order_relaxed)) {
+                }
+            }
+        };
 
         mutable mutex::unique_lock::mutex_type _tasks_mutex alignas(mutex::alignment) {};
         std::condition_variable_any _tasks_cv alignas(mutex::alignment) {};
@@ -469,8 +539,9 @@ namespace turbo {
         _impl->process_once(report_status);
     }
 
-    void scheduler::wait_all(const std::string &task_group, const wait_all_submit_func_t &submit_func)
+    void scheduler::wait_all(const std::string &task_group, const wait_all_submit_func_t &submit_func,
+        const wait_all_options options)
     {
-        return _impl->wait_all_done(task_group, submit_func);
+        return _impl->wait_all_done(task_group, submit_func, options);
     }
 }
