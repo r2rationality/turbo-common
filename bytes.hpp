@@ -5,13 +5,24 @@
 #include <algorithm>
 #include <array>
 #include <concepts>
+#include <cstring>
 #include <span>
+#include <type_traits>
 #include <utility>
 #include "error.hpp"
 #include "format.hpp"
 
 namespace turbo {
     typedef std::span<uint8_t> write_buffer;
+
+    template <typename T>
+    [[nodiscard]] inline T load_unaligned(const void *data) noexcept
+    {
+        static_assert(std::is_trivially_copyable_v<T>);
+        T value;
+        std::memcpy(&value, data, sizeof(value));
+        return value;
+    }
 
     template <std::integral T>
     [[nodiscard]] constexpr T byteswap_if_little_endian(T value) noexcept {
@@ -80,9 +91,7 @@ namespace turbo {
             static_assert(std::is_trivially_copyable_v<M>);
             if (size() != sizeof(M)) [[unlikely]]
                 throw error(fmt::format("buffer size: {} does not match the type's size: {}!", size(), sizeof(M)));
-            M result;
-            std::memcpy(&result, data(), sizeof(M));
-            return result;
+            return load_unaligned<M>(data());
         }
 
         template<typename M>
