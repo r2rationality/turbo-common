@@ -1,6 +1,7 @@
 /* Copyright (c) 2022-2023 Alex Sierkov (alex dot sierkov at gmail dot com)
  * Copyright (c) 2024-2025 R2 Rationality OÜ (info at r2rationality dot com) */
 
+#include <array>
 #include <turbo/common/test.hpp>
 #include "scheduler.hpp"
 
@@ -156,21 +157,35 @@ suite turbo_common_scheduler_suite = [] {
         };
         "wait_for_count"_test = [] {
             scheduler s {};
-            std::atomic_size_t num_completed = 0;
+            std::array<size_t, 2> completed {};
             s.submit("test", 100, [&] {
                 s.wait_all("wait", [&](const auto &, const auto &submit_f) {
                     submit_f({ 200, "wait", [&] {
                         std::this_thread::sleep_for(std::chrono::milliseconds { 500 });
-                        num_completed.fetch_add(1, std::memory_order_relaxed);
+                        completed[0] = 1;
                     }});
                     submit_f({ 300, "wait", [&] {
                         std::this_thread::sleep_for(std::chrono::milliseconds { 200 });
-                        num_completed.fetch_add(1, std::memory_order_relaxed);
+                        completed[1] = 1;
                     }});
                 });
+                // wait_all is the synchronization barrier for these non-atomic writes.
+                expect_equal(1ULL, completed[0]);
+                expect_equal(1ULL, completed[1]);
             });
             s.process();
-            expect_equal(2ULL, num_completed.load(std::memory_order_relaxed));
+        };
+        "wait error observer owns its state"_test = [] {
+            scheduler s {};
+            s.submit("outer", 100, [&] {
+                s.wait_all("wait", [&](const auto &, const auto &submit_f) {
+                    submit_f({ 200, "wait", [] {} });
+                });
+                // wait_all's observer remains registered until process() finishes.
+                // A later same-group error must not access wait_all's former stack.
+                s.submit("wait", 100, [] { throw error("expected test error"); });
+            });
+            expect(!s.process_ok(false));
         };
         /*"clear_observers"_test = [] {
             scheduler s {};

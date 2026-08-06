@@ -205,16 +205,19 @@ namespace turbo {
                 throw error("concurrent wait_all_done calls are not allowed!");
             if (_num_workers < 4)
                 throw error(fmt::format("wait_all_done relies on a high worker count but got {} worker threads!", _num_workers));
-            std::atomic_size_t errors = 0;
+            const bool collect_diagnostics = options.report_diagnostics;
+            auto state = std::make_shared<wait_all_state>(collect_diagnostics);
             try {
                 static constexpr std::chrono::milliseconds report_period{10000};
                 const auto wait_start = std::chrono::steady_clock::now();
                 auto next_warn = wait_start + report_period;
-                on_error(task_group, [&errors](const auto &) {
-                    errors.fetch_add(1, std::memory_order_relaxed);
-;                }, true);
-                const bool collect_diagnostics = options.report_diagnostics;
-                auto state = std::make_shared<wait_all_state>(collect_diagnostics);
+                // The observer remains registered until process() finishes. Retain
+                // the state it updates rather than referring to this stack frame.
+                on_error(task_group, [state](const auto &) {
+                    // A failed task does not decrement todo, so this counter is also
+                    // part of the wait barrier. Publish the task's preceding writes.
+                    state->errors.fetch_add(1, std::memory_order_acq_rel);
+                }, true);
                 scheduler::todo_count_t todo { state, &state->todo };
                 const bool caller_is_worker = collect_diagnostics && _get_worker_id().has_value();
                 const auto active_workers_at_start = collect_diagnostics
@@ -231,7 +234,9 @@ namespace turbo {
                     task.task = [prev_action=task.task, state] {
                         if (!state->collect_diagnostics) {
                             prev_action();
-                            state->todo.fetch_sub(1, std::memory_order_relaxed);
+                            // wait_all promises that task writes are visible when it
+                            // returns, independently of diagnostic collection.
+                            state->todo.fetch_sub(1, std::memory_order_acq_rel);
                             return;
                         }
                         const auto task_start = std::chrono::steady_clock::now();
@@ -244,17 +249,19 @@ namespace turbo {
                 const auto submit_done = collect_diagnostics ? std::chrono::steady_clock::now() : wait_start;
                 const auto process_results = !_process_running.load();
                 for (;;) {
-                    auto num_todo = state->todo.load(std::memory_order_relaxed) - errors.load(std::memory_order_relaxed);
+                    auto num_todo = state->todo.load(std::memory_order_relaxed) - state->errors.load(std::memory_order_relaxed);
                     if (num_todo == 0) {
-                        if (collect_diagnostics)
-                            static_cast<void>(state->todo.load(std::memory_order_acquire));
+                        // Pair with both successful and failed task completion. Keep
+                        // relaxed polling above; acquire only on the return path.
+                        static_cast<void>(state->todo.load(std::memory_order_acquire));
+                        static_cast<void>(state->errors.load(std::memory_order_acquire));
                         break;
                     }
                     if (const auto now = std::chrono::steady_clock::now(); now >= next_warn) {
                         next_warn = now + report_period;
                         logger::warn(
                             "wait_all_done takes longer than expected task: {} todo: {} errors: {} process_results: {} waiting for: {} secs",
-                            task_group, num_todo, errors.load(), process_results,
+                            task_group, num_todo, state->errors.load(), process_results,
                             std::chrono::duration_cast<std::chrono::seconds>(now - wait_start).count());
                     }
                     _process_once(true, false, process_results);
@@ -291,7 +298,7 @@ namespace turbo {
                 _wait_all_done_running = false;
                 throw;
             }
-            if (errors > 0) [[unlikely]]
+            if (state->errors.load(std::memory_order_acquire) > 0) [[unlikely]]
                 throw scheduler_error(fmt::format("wait_all_done {} - there were failed tasks; cannot continue", task_group));
         }
     private:
@@ -317,6 +324,7 @@ namespace turbo {
             }
 
             std::atomic_size_t todo = 0;
+            std::atomic_size_t errors = 0;
             std::atomic_uint64_t total_ns = 0;
             std::atomic_uint64_t max_ns = 0;
             const bool collect_diagnostics;
