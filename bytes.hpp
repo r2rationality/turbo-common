@@ -327,9 +327,10 @@ namespace turbo {
         {
         }
 
-        uint8_vector(const buffer bytes):
-            std::vector<uint8_t>(bytes.data(), bytes.data() + bytes.size())
+        uint8_vector(const buffer bytes)
         {
+            if (!bytes.empty())
+                assign(bytes.data(), bytes.data() + bytes.size());
         }
 
         operator buffer() const noexcept
@@ -345,7 +346,8 @@ namespace turbo {
         uint8_vector &operator=(const buffer bytes)
         {
             resize(bytes.size());
-            memcpy(data(), bytes.data(), bytes.size());
+            if (!bytes.empty())
+                memcpy(data(), bytes.data(), bytes.size());
             return *this;
         }
 
