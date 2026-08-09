@@ -43,7 +43,7 @@ namespace turbo {
         struct pool_allocator_resource_t {
             static_assert(BATCH_SZ > 0, "a pool allocator batch must contain at least one slot");
 
-            pool_allocator_resource_t() = default;
+            pool_allocator_resource_t() =default;
             pool_allocator_resource_t(const pool_allocator_resource_t &) = delete;
             pool_allocator_resource_t(pool_allocator_resource_t &&) = delete;
             pool_allocator_resource_t &operator=(const pool_allocator_resource_t &) = delete;
@@ -258,6 +258,11 @@ namespace turbo {
         }
 
         [[nodiscard]] pool_allocator_t select_on_container_copy_construction() const
+        {
+            return fresh();
+        }
+
+        [[nodiscard]] pool_allocator_t fresh() const
         {
             return {};
         }
