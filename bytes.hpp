@@ -125,21 +125,21 @@ namespace turbo {
             return std::strong_ordering::equal == (*this <=> o);
         }
 
-        uint8_t at(const size_t off) const
+        [[nodiscard]] uint8_t at(const size_t off) const
         {
             if (off < size()) [[likely]]
                 return (*this)[off];
             throw error(fmt::format("requested offset: {} that behind the end of buffer: {}!", off, size()));
         }
 
-        buffer subbuf(const size_t offset, const size_t sz) const
+        [[nodiscard]] buffer subbuf(const size_t offset, const size_t sz) const
         {
             if (static_cast<int>(offset <= size()) & static_cast<int>(sz <= size() - offset)) [[likely]]
                 return buffer { data() + offset, sz };
             throw error(fmt::format("requested offset: {} and size: {} end over the end of buffer's size: {}!", offset, sz, size()));
         }
 
-        buffer subbuf(const size_t offset) const
+        [[nodiscard]] buffer subbuf(const size_t offset) const
         {
             if (offset <= size()) [[likely]]
                 return subbuf(offset, size() - offset);
@@ -174,7 +174,7 @@ namespace turbo {
         byte_array(const buffer s)
         {
             if (s.size() != SZ) [[unlikely]]
-                throw error(fmt::format("string_view must be of size {} but got {}", SZ, s.size()));
+                throw error(fmt::format("byte string must be of size {} but got {}", SZ, s.size()));
             memcpy(this, std::data(s), SZ);
         }
 
@@ -188,7 +188,7 @@ namespace turbo {
         byte_array &operator=(const buffer s)
         {
             if (s.size() != SZ) [[unlikely]]
-                throw error(fmt::format("string_view must be of size {} but got {}", SZ, s.size()));
+                throw error(fmt::format("byte string must be of size {} but got {}", SZ, s.size()));
             memcpy(this, std::data(s), SZ);
             return *this;
         }
@@ -206,7 +206,7 @@ namespace turbo {
             return SZ * 8;
         }
 
-        bool bit(const size_t bit_no) const
+        [[nodiscard]] bool bit(const size_t bit_no) const
         {
             const auto byte_no = bit_no >> 3U;
             const auto byte_bit_no = size_t{7} - (bit_no & 0x7);
@@ -338,7 +338,7 @@ namespace turbo {
             return { data(), size() };
         }
 
-        std::string_view str() const noexcept
+        [[nodiscard]] std::string_view str() const noexcept
         {
             return { reinterpret_cast<const char *>(data()), size() };
         }
