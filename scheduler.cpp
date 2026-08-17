@@ -351,7 +351,8 @@ namespace turbo {
                                 ++active_tasks[*task_name];
                         }
                     }
-                    logger::debug("scheduler tasks total: {} active: {}", num_tasks, active_tasks);
+                    logger::debug("scheduler tasks total: {} active: {} rss_mb: {} peak_rss_mb: {}",
+                        num_tasks, active_tasks, memory::my_usage_mb(), memory::max_usage_mb());
                     progress::get().inform();
                 }
             }
