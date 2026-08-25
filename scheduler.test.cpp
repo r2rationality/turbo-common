@@ -2,6 +2,7 @@
  * Copyright (c) 2024-2025 R2 Rationality OÜ (info at r2rationality dot com) */
 
 #include <array>
+#include <thread>
 #include <turbo/common/test.hpp>
 #include "scheduler.hpp"
 
@@ -174,6 +175,39 @@ suite turbo_common_scheduler_suite = [] {
                 expect_equal(1ULL, completed[1]);
             });
             s.process();
+        };
+        "wait_all worker helps its own barrier"_test = [] {
+            scheduler s { 4 };
+            std::atomic_size_t helped_by_waiter = 0;
+            s.submit("outer", 100, [&] {
+                const auto waiter_id = std::this_thread::get_id();
+                s.wait_all("wait", [&](const auto &, const auto &submit_f) {
+                    for (size_t i = 0; i < 64; ++i) {
+                        submit_f({ 200, "wait", [&, waiter_id] {
+                            if (std::this_thread::get_id() == waiter_id)
+                                helped_by_waiter.fetch_add(1, std::memory_order_relaxed);
+                            std::this_thread::sleep_for(1ms);
+                        }});
+                    }
+                });
+            });
+            s.process(false);
+            expect(helped_by_waiter.load(std::memory_order_relaxed) > 0_u);
+        };
+        "wait_all cooperative task error releases barrier"_test = [] {
+            scheduler s { 4 };
+            std::atomic_bool barrier_error = false;
+            s.submit("outer", 100, [&] {
+                try {
+                    s.wait_all("wait", [&](const auto &, const auto &submit_f) {
+                        submit_f({ 200, "wait", [] { throw error("expected test error"); }});
+                    });
+                } catch (const scheduler_error &) {
+                    barrier_error.store(true, std::memory_order_relaxed);
+                }
+            });
+            expect(!s.process_ok(false));
+            expect(barrier_error.load(std::memory_order_relaxed));
         };
         "wait error observer owns its state"_test = [] {
             scheduler s {};
