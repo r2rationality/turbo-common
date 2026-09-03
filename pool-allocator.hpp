@@ -51,8 +51,6 @@ namespace turbo {
 
             void *allocate(const size_t size, const size_t alignment)
             {
-                if (_bulk_release)
-                    std::terminate();
                 auto &bucket = _bucket(size, alignment);
                 if (bucket.free) {
                     auto *ptr = bucket.free;
@@ -62,20 +60,26 @@ namespace turbo {
                         std::memset(ptr, 0, size);
                     return ptr;
                 }
-                if (bucket.arenas.empty() || bucket.arena_offset == bucket.arena_capacity)
+                if (bucket.arenas.empty()) [[unlikely]] {
                     _add_arena(bucket);
-                auto *arena = static_cast<std::byte *>(bucket.arenas.back());
+                } else if (bucket.arena_offset == bucket.arenas[bucket.arena_index].capacity) [[unlikely]] {
+                    if (bucket.arena_index + 1 == bucket.arenas.size()) {
+                        _add_arena(bucket);
+                    } else {
+                        ++bucket.arena_index;
+                        bucket.arena_offset = 0;
+                    }
+                }
+                auto *arena = static_cast<std::byte *>(bucket.arenas[bucket.arena_index].data);
                 return arena + bucket.arena_offset++ * bucket.stride;
             }
 
             void deallocate(void *ptr, const size_t size, const size_t alignment) noexcept
             {
-                if (!ptr)
-                    return;
-                if (_bulk_release)
+                if (!ptr) [[unlikely]]
                     return;
                 auto *bucket = _find_bucket(size, alignment);
-                if (!bucket)
+                if (!bucket) [[unlikely]]
                     std::terminate();
                 std::memcpy(ptr, &bucket->free, sizeof(bucket->free));
                 bucket->free = ptr;
@@ -90,21 +94,27 @@ namespace turbo {
                 return count;
             }
 
-            void begin_bulk_release() noexcept
+            void recycle_all() noexcept
             {
-                _bulk_release = true;
+                for (auto &bucket: _buckets)
+                    bucket->recycle_all();
             }
 
         private:
             struct bucket_t {
+                struct arena_t {
+                    void *data;
+                    size_t capacity;
+                };
+
                 size_t size;
                 size_t alignment;
                 size_t stride;
-                std::vector<void *> arenas {};
+                std::vector<arena_t> arenas {};
                 void *free = nullptr;
                 size_t free_count = 0;
+                size_t arena_index = 0;
                 size_t arena_offset = 0;
-                size_t arena_capacity = 0;
                 size_t next_arena_capacity = 1;
 
                 bucket_t(const size_t item_size, const size_t item_alignment):
@@ -116,15 +126,27 @@ namespace turbo {
 
                 ~bucket_t()
                 {
-                    for (auto *arena: arenas)
-                        operator delete(arena, std::align_val_t { alignment });
+                    for (const auto &arena: arenas)
+                        operator delete(arena.data, std::align_val_t { alignment });
+                }
+
+                void recycle_all() noexcept
+                {
+                    free = nullptr;
+                    free_count = 0;
+                    arena_index = 0;
+                    arena_offset = 0;
+                    if constexpr (zero_policy_has(ZERO_POLICY, zero_policy_t::free_list)) {
+                        for (const auto &arena: arenas)
+                            std::memset(arena.data, 0, arena.capacity * stride);
+                    }
                 }
 
             private:
                 static size_t _align_up(const size_t size, const size_t alignment)
                 {
                     const auto rem = size % alignment;
-                    if (!rem)
+                    if (!rem) [[likely]]
                         return size;
                     const auto padding = alignment - rem;
                     if (size > std::numeric_limits<size_t>::max() - padding) [[unlikely]]
@@ -134,12 +156,11 @@ namespace turbo {
             };
 
             std::vector<std::unique_ptr<bucket_t>> _buckets {};
-            bool _bulk_release = false;
 
             bucket_t *_find_bucket(const size_t size, const size_t alignment) noexcept
             {
                 for (auto &bucket: _buckets) {
-                    if (bucket->size == size && bucket->alignment == std::max(alignment, alignof(void *)))
+                    if (bucket->size == size && bucket->alignment == std::max(alignment, alignof(void *))) [[likely]]
                         return bucket.get();
                 }
                 return nullptr;
@@ -147,7 +168,7 @@ namespace turbo {
 
             bucket_t &_bucket(const size_t size, const size_t alignment)
             {
-                if (auto *bucket = _find_bucket(size, alignment))
+                if (auto *bucket = _find_bucket(size, alignment)) [[likely]]
                     return *bucket;
                 return *_buckets.emplace_back(std::make_unique<bucket_t>(size, alignment));
             }
@@ -162,13 +183,13 @@ namespace turbo {
                 if constexpr (zero_policy_has(ZERO_POLICY, zero_policy_t::new_arena))
                     std::memset(arena, 0, arena_size);
                 try {
-                    bucket.arenas.push_back(arena);
+                    bucket.arenas.push_back({ arena, capacity });
                 } catch (...) {
                     operator delete(arena, std::align_val_t { bucket.alignment });
                     throw;
                 }
+                bucket.arena_index = bucket.arenas.size() - 1;
                 bucket.arena_offset = 0;
-                bucket.arena_capacity = capacity;
                 bucket.next_arena_capacity = capacity >= (BATCH_SZ + 1) / 2
                     ? BATCH_SZ
                     : capacity * 2;
@@ -180,10 +201,14 @@ namespace turbo {
     // and rebinds share a resource, which is required by node-based containers.
     // A copied container receives a fresh resource so that one container can
     // never release storage still owned by another container.
+    // SKIP_DTOR applies to ptr_t: when enabled, destroying a pointer recycles
+    // its storage without invoking T's destructor. Such pointers hold a
+    // non-owning resource reference, so at least one allocator sharing that
+    // resource must outlive them. This permits pool-owned object graphs to be
+    // discarded in bulk without walking them or creating a reference cycle.
+    // The resource itself owns raw storage and never discovers live objects.
     template<typename T, size_t BATCH_SZ = 0x1000, bool SKIP_DTOR = std::is_trivially_destructible_v<T>, zero_policy_t ZERO_POLICY = zero_policy_t::none>
     struct pool_allocator_t {
-        static_assert(SKIP_DTOR, "pool_allocator_t does not call T's destructor on pool destruction; "
-            "set SKIP_DTOR=true to acknowledge this if T only owns resources within the same pool");
         static_assert(zero_policy_type_ok_t<T, ZERO_POLICY>::value,
             "pool_allocator_t zeroing is only supported for trivially copyable T");
 
@@ -230,11 +255,18 @@ namespace turbo {
         }
 
         struct deleter_t {
-            std::shared_ptr<detail::pool_allocator_resource_t<BATCH_SZ, ZERO_POLICY>> resource {};
+            using resource_type = detail::pool_allocator_resource_t<BATCH_SZ, ZERO_POLICY>;
+            using resource_ref_type = std::conditional_t<
+                SKIP_DTOR, resource_type *, std::shared_ptr<resource_type>>;
+            resource_ref_type resource {};
 
             void operator()(T *ptr) const noexcept
             {
-                if (resource)
+                if (!ptr) [[unlikely]]
+                    return;
+                if constexpr (!SKIP_DTOR)
+                    std::destroy_at(ptr);
+                if (resource) [[likely]]
                     resource->deallocate(ptr, sizeof(T), alignof(T));
             }
         };
@@ -250,9 +282,9 @@ namespace turbo {
 
         void deallocate(T *ptr, const size_t n=1) noexcept
         {
-            if (!ptr)
+            if (!ptr) [[unlikely]]
                 return;
-            if (!_resource || n > std::numeric_limits<size_t>::max() / sizeof(T))
+            if (!_resource || n > std::numeric_limits<size_t>::max() / sizeof(T)) [[unlikely]]
                 std::terminate();
             _resource->deallocate(ptr, n * sizeof(T), alignof(T));
         }
@@ -277,7 +309,10 @@ namespace turbo {
                 deallocate(raw);
                 throw;
             }
-            return { raw, deleter_t { _resource } };
+            if constexpr (SKIP_DTOR)
+                return { raw, deleter_t { _resource.get() } };
+            else
+                return { raw, deleter_t { _resource } };
         }
 
         [[nodiscard]] size_t free_count() const noexcept
@@ -285,13 +320,14 @@ namespace turbo {
             return _resource ? _resource->free_count() : 0;
         }
 
-        // The allocator and every allocation backed by it must be destroyed
-        // immediately after this call. Deallocation is suppressed so that the
-        // resource destructor can drop all arena pages in bulk.
-        void begin_bulk_release() noexcept
+        // Invalidates every allocation and makes all existing arena slots
+        // reusable. No external owner whose deleter can run later may survive
+        // this call.
+        void recycle_all() noexcept
         {
-            if (_resource)
-                _resource->begin_bulk_release();
+            if (!_resource) [[unlikely]]
+                std::terminate();
+            _resource->recycle_all();
         }
 
         template<typename U>
@@ -309,7 +345,7 @@ namespace turbo {
 
         resource_type &_get_resource()
         {
-            if (!_resource)
+            if (!_resource) [[unlikely]]
                 _resource = std::make_shared<resource_type>();
             return *_resource;
         }

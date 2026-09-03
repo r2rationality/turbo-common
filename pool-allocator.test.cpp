@@ -44,6 +44,96 @@ suite turbo_common_pool_allocator_suite = [] {
             expect(raw == alloc.allocate());
         };
 
+        "make_ptr destroys nested objects when requested"_test = [] {
+            struct node_t;
+            using allocator_type = pool_allocator_t<node_t, 4, false>;
+            struct node_t {
+                size_t &destroy_count;
+                typename allocator_type::ptr_t child {};
+
+                explicit node_t(size_t &count): destroy_count { count }
+                {
+                }
+
+                ~node_t()
+                {
+                    ++destroy_count;
+                }
+            };
+
+            size_t destroy_count = 0;
+            allocator_type alloc {};
+            {
+                auto root = alloc.make_ptr(destroy_count);
+                root->child = alloc.make_ptr(destroy_count);
+            }
+            expect_equal(size_t{2}, destroy_count);
+            expect_equal(size_t{2}, alloc.free_count());
+        };
+
+        "destructor-enabled pointer keeps the resource alive"_test = [] {
+            struct value_t {
+                size_t &destroy_count;
+
+                explicit value_t(size_t &count): destroy_count { count }
+                {
+                }
+
+                ~value_t()
+                {
+                    ++destroy_count;
+                }
+            };
+
+            using allocator_type = pool_allocator_t<value_t, 4>;
+            size_t destroy_count = 0;
+            allocator_type::ptr_t ptr {};
+            {
+                allocator_type alloc {};
+                ptr = alloc.make_ptr(destroy_count);
+            }
+            expect_equal(size_t{0}, destroy_count);
+            ptr.reset();
+            expect_equal(size_t{1}, destroy_count);
+        };
+
+        "make_ptr skips pool-owned object graphs"_test = [] {
+            struct node_t;
+            using allocator_type = pool_allocator_t<node_t, 4, true>;
+            struct node_t {
+                size_t &destroy_count;
+                typename allocator_type::ptr_t child {};
+
+                explicit node_t(size_t &count): destroy_count { count }
+                {
+                }
+
+                ~node_t()
+                {
+                    ++destroy_count;
+                }
+            };
+
+            size_t destroy_count = 0;
+            allocator_type alloc {};
+            auto root = alloc.make_ptr(destroy_count);
+            root->child = alloc.make_ptr(destroy_count);
+            const std::set<node_t *> before { root.get(), root->child.get() };
+
+            root.reset();
+            alloc.recycle_all();
+            expect_equal(size_t{0}, destroy_count);
+
+            {
+                auto first = alloc.make_ptr(destroy_count);
+                auto second = alloc.make_ptr(destroy_count);
+                const std::set<node_t *> after { first.get(), second.get() };
+                expect(before == after);
+            }
+            expect_equal(size_t{0}, destroy_count);
+            expect_equal(size_t{2}, alloc.free_count());
+        };
+
         "SKIP_DTOR opt-in"_test = [] {
             struct non_trivial {
                 ~non_trivial() {}
@@ -74,6 +164,21 @@ suite turbo_common_pool_allocator_suite = [] {
             expect_equal(size_t{batch_size * 3U}, ptrs.size());
         };
 
+        "bulk recycle"_test = [] {
+            static constexpr size_t batch_size = 4;
+            pool_allocator_t<size_t, batch_size> alloc {};
+            std::set<size_t *> before {};
+            for (size_t i = 0; i < batch_size * 3; ++i)
+                before.emplace(alloc.allocate());
+
+            alloc.recycle_all();
+
+            std::set<size_t *> after {};
+            for (size_t i = 0; i < batch_size * 3; ++i)
+                after.emplace(alloc.allocate());
+            expect(before == after);
+        };
+
         "std map adapter"_test = [] {
             using value_type = std::pair<const size_t, std::string>;
             using allocator_type = pool_allocator_t<value_type, 4, true>;
@@ -94,7 +199,6 @@ suite turbo_common_pool_allocator_suite = [] {
             {
                 map_type retired {};
                 retired.swap(copy);
-                retired.get_allocator().begin_bulk_release();
             }
             expect(copy.empty());
             expect(values.at(2) == "two");
@@ -107,7 +211,6 @@ suite turbo_common_pool_allocator_suite = [] {
             {
                 map_type retired {};
                 retired.swap(moved);
-                retired.get_allocator().begin_bulk_release();
             }
             expect(moved.empty());
             moved.try_emplace(3, "three");
