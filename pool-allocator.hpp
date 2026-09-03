@@ -16,30 +16,17 @@
 namespace turbo {
     enum class zero_policy_t: uint8_t {
         none = 0,
-        new_arena = 1,
-        free_list = 2,
-        all = new_arena | free_list
+        all = 1
     };
 
-    template<typename T, zero_policy_t ZERO_POLICY>
-    struct zero_policy_type_ok_t: std::true_type {};
+    template<typename T, zero_policy_t>
+    struct zero_policy_type_ok_t: std::bool_constant<std::is_trivially_copyable_v<T>> {};
 
     template<typename T>
-    struct zero_policy_type_ok_t<T, zero_policy_t::new_arena>: std::bool_constant<std::is_trivially_copyable_v<T>> {};
-
-    template<typename T>
-    struct zero_policy_type_ok_t<T, zero_policy_t::free_list>: std::bool_constant<std::is_trivially_copyable_v<T>> {};
-
-    template<typename T>
-    struct zero_policy_type_ok_t<T, zero_policy_t::all>: std::bool_constant<std::is_trivially_copyable_v<T>> {};
-
-    [[nodiscard]] constexpr bool zero_policy_has(const zero_policy_t policy, const zero_policy_t flag) noexcept
-    {
-        return (static_cast<uint8_t>(policy) & static_cast<uint8_t>(flag)) != 0;
-    }
+    struct zero_policy_type_ok_t<T, zero_policy_t::none>: std::true_type {};
 
     namespace detail {
-        template<size_t BATCH_SZ, zero_policy_t ZERO_POLICY>
+        template<typename T, size_t BATCH_SZ, zero_policy_t ZERO_POLICY>
         struct pool_allocator_resource_t {
             static_assert(BATCH_SZ > 0, "a pool allocator batch must contain at least one slot");
 
@@ -49,158 +36,109 @@ namespace turbo {
             pool_allocator_resource_t &operator=(const pool_allocator_resource_t &) = delete;
             pool_allocator_resource_t &operator=(pool_allocator_resource_t &&) = delete;
 
-            void *allocate(const size_t size, const size_t alignment)
+            [[nodiscard]] T *allocate()
             {
-                auto &bucket = _bucket(size, alignment);
-                if (bucket.free) {
-                    auto *ptr = bucket.free;
-                    std::memcpy(&bucket.free, ptr, sizeof(bucket.free));
-                    --bucket.free_count;
-                    if constexpr (zero_policy_has(ZERO_POLICY, zero_policy_t::free_list))
-                        std::memset(ptr, 0, size);
-                    return ptr;
-                }
-                if (bucket.arenas.empty()) [[unlikely]] {
-                    _add_arena(bucket);
-                } else if (bucket.arena_offset == bucket.arenas[bucket.arena_index].capacity) [[unlikely]] {
-                    if (bucket.arena_index + 1 == bucket.arenas.size()) {
-                        _add_arena(bucket);
-                    } else {
-                        ++bucket.arena_index;
-                        bucket.arena_offset = 0;
+                T *ptr = nullptr;
+                if (_free) {
+                    ptr = static_cast<T *>(_free);
+                    std::memcpy(&_free, ptr, sizeof(_free));
+                    --_free_count;
+                } else {
+                    if (_arenas.empty()) [[unlikely]] {
+                        _add_arena();
+                    } else if (_arena_offset == _arenas[_arena_index].capacity) [[unlikely]] {
+                        if (_arena_index + 1 == _arenas.size()) {
+                            _add_arena();
+                        } else {
+                            ++_arena_index;
+                            _arena_offset = 0;
+                        }
                     }
+                    auto *arena = static_cast<std::byte *>(_arenas[_arena_index].data);
+                    ptr = reinterpret_cast<T *>(arena + _arena_offset++ * _stride);
                 }
-                auto *arena = static_cast<std::byte *>(bucket.arenas[bucket.arena_index].data);
-                return arena + bucket.arena_offset++ * bucket.stride;
+                if constexpr (ZERO_POLICY == zero_policy_t::all)
+                    std::memset(ptr, 0, sizeof(T));
+                return ptr;
             }
 
-            void deallocate(void *ptr, const size_t size, const size_t alignment) noexcept
+            void deallocate(T *ptr) noexcept
             {
-                if (!ptr) [[unlikely]]
-                    return;
-                auto *bucket = _find_bucket(size, alignment);
-                if (!bucket) [[unlikely]]
-                    std::terminate();
-                std::memcpy(ptr, &bucket->free, sizeof(bucket->free));
-                bucket->free = ptr;
-                ++bucket->free_count;
+                std::memcpy(ptr, &_free, sizeof(_free));
+                _free = ptr;
+                ++_free_count;
             }
 
             [[nodiscard]] size_t free_count() const noexcept
             {
-                size_t count = 0;
-                for (const auto &bucket: _buckets)
-                    count += bucket->free_count;
-                return count;
+                return _free_count;
             }
 
             void recycle_all() noexcept
             {
-                for (auto &bucket: _buckets)
-                    bucket->recycle_all();
+                _free = nullptr;
+                _free_count = 0;
+                _arena_index = 0;
+                _arena_offset = 0;
+            }
+
+            ~pool_allocator_resource_t()
+            {
+                for (const auto &arena: _arenas)
+                    operator delete(arena.data, std::align_val_t { _alignment });
             }
 
         private:
-            struct bucket_t {
-                struct arena_t {
-                    void *data;
-                    size_t capacity;
-                };
-
-                size_t size;
-                size_t alignment;
-                size_t stride;
-                std::vector<arena_t> arenas {};
-                void *free = nullptr;
-                size_t free_count = 0;
-                size_t arena_index = 0;
-                size_t arena_offset = 0;
-                size_t next_arena_capacity = 1;
-
-                bucket_t(const size_t item_size, const size_t item_alignment):
-                    size { item_size },
-                    alignment { std::max(item_alignment, alignof(void *)) },
-                    stride { _align_up(std::max(item_size, sizeof(void *)), alignment) }
-                {
-                }
-
-                ~bucket_t()
-                {
-                    for (const auto &arena: arenas)
-                        operator delete(arena.data, std::align_val_t { alignment });
-                }
-
-                void recycle_all() noexcept
-                {
-                    free = nullptr;
-                    free_count = 0;
-                    arena_index = 0;
-                    arena_offset = 0;
-                    if constexpr (zero_policy_has(ZERO_POLICY, zero_policy_t::free_list)) {
-                        for (const auto &arena: arenas)
-                            std::memset(arena.data, 0, arena.capacity * stride);
-                    }
-                }
-
-            private:
-                static size_t _align_up(const size_t size, const size_t alignment)
-                {
-                    const auto rem = size % alignment;
-                    if (!rem) [[likely]]
-                        return size;
-                    const auto padding = alignment - rem;
-                    if (size > std::numeric_limits<size_t>::max() - padding) [[unlikely]]
-                        throw std::bad_array_new_length {};
-                    return size + padding;
-                }
+            struct arena_t {
+                void *data;
+                size_t capacity;
             };
 
-            std::vector<std::unique_ptr<bucket_t>> _buckets {};
-
-            bucket_t *_find_bucket(const size_t size, const size_t alignment) noexcept
+            static constexpr size_t _align_up(const size_t size, const size_t alignment)
             {
-                for (auto &bucket: _buckets) {
-                    if (bucket->size == size && bucket->alignment == std::max(alignment, alignof(void *))) [[likely]]
-                        return bucket.get();
-                }
-                return nullptr;
-            }
-
-            bucket_t &_bucket(const size_t size, const size_t alignment)
-            {
-                if (auto *bucket = _find_bucket(size, alignment)) [[likely]]
-                    return *bucket;
-                return *_buckets.emplace_back(std::make_unique<bucket_t>(size, alignment));
-            }
-
-            static void _add_arena(bucket_t &bucket)
-            {
-                const auto capacity = bucket.next_arena_capacity;
-                if (bucket.stride > std::numeric_limits<size_t>::max() / capacity) [[unlikely]]
+                const auto rem = size % alignment;
+                if (!rem) [[likely]]
+                    return size;
+                const auto padding = alignment - rem;
+                if (size > std::numeric_limits<size_t>::max() - padding) [[unlikely]]
                     throw std::bad_array_new_length {};
-                const auto arena_size = capacity * bucket.stride;
-                auto *arena = operator new(arena_size, std::align_val_t { bucket.alignment });
-                if constexpr (zero_policy_has(ZERO_POLICY, zero_policy_t::new_arena))
-                    std::memset(arena, 0, arena_size);
+                return size + padding;
+            }
+
+            static constexpr size_t _alignment = std::max(alignof(T), alignof(void *));
+            static constexpr size_t _stride = _align_up(std::max(sizeof(T), sizeof(void *)), _alignment);
+            std::vector<arena_t> _arenas {};
+            void *_free = nullptr;
+            size_t _free_count = 0;
+            size_t _arena_index = 0;
+            size_t _arena_offset = 0;
+            size_t _next_arena_capacity = 1;
+
+            void _add_arena()
+            {
+                const auto capacity = _next_arena_capacity;
+                if (_stride > std::numeric_limits<size_t>::max() / capacity) [[unlikely]]
+                    throw std::bad_array_new_length {};
+                const auto arena_size = capacity * _stride;
+                auto *arena = operator new(arena_size, std::align_val_t { _alignment });
                 try {
-                    bucket.arenas.push_back({ arena, capacity });
+                    _arenas.push_back({ arena, capacity });
                 } catch (...) {
-                    operator delete(arena, std::align_val_t { bucket.alignment });
+                    operator delete(arena, std::align_val_t { _alignment });
                     throw;
                 }
-                bucket.arena_index = bucket.arenas.size() - 1;
-                bucket.arena_offset = 0;
-                bucket.next_arena_capacity = capacity >= (BATCH_SZ + 1) / 2
+                _arena_index = _arenas.size() - 1;
+                _arena_offset = 0;
+                _next_arena_capacity = capacity >= (BATCH_SZ + 1) / 2
                     ? BATCH_SZ
                     : capacity * 2;
             }
         };
     }
 
-    // A standard-library-compatible recyclable pool allocator. Allocator copies
-    // and rebinds share a resource, which is required by node-based containers.
-    // A copied container receives a fresh resource so that one container can
-    // never release storage still owned by another container.
+    // A single-type recyclable object pool. Each allocation reserves exactly
+    // one T; this is intentionally not a standard-container allocator.
+    // Pool copies share their resource.
     // SKIP_DTOR applies to ptr_t: when enabled, destroying a pointer recycles
     // its storage without invoking T's destructor. Such pointers hold a
     // non-owning resource reference, so at least one allocator sharing that
@@ -212,50 +150,17 @@ namespace turbo {
         static_assert(zero_policy_type_ok_t<T, ZERO_POLICY>::value,
             "pool_allocator_t zeroing is only supported for trivially copyable T");
 
-        using value_type = T;
-        using size_type = size_t;
-        using difference_type = std::ptrdiff_t;
-        using propagate_on_container_move_assignment = std::true_type;
-        using propagate_on_container_swap = std::true_type;
-        using is_always_equal = std::false_type;
-
-        template<typename U>
-        struct rebind {
-            using other = pool_allocator_t<U, BATCH_SZ, SKIP_DTOR, ZERO_POLICY>;
-        };
-
         pool_allocator_t(): _resource { std::make_shared<resource_type>() }
         {
         }
 
         pool_allocator_t(const pool_allocator_t &) noexcept =default;
-
-        // Moving a standard container's allocator must leave the source able
-        // to release storage that the container implementation leaves behind.
-        // In particular, MSVC's node containers allocate a replacement
-        // sentinel before propagating the allocator during move assignment.
-        // Sharing the resource is cheap and keeps both allocator objects valid.
-        pool_allocator_t(pool_allocator_t &&o) noexcept:
-            _resource { o._resource }
-        {
-        }
-
+        pool_allocator_t(pool_allocator_t &&) noexcept =default;
         pool_allocator_t &operator=(const pool_allocator_t &) noexcept =default;
-
-        pool_allocator_t &operator=(pool_allocator_t &&o) noexcept
-        {
-            _resource = o._resource;
-            return *this;
-        }
-
-        template<typename U>
-        pool_allocator_t(const pool_allocator_t<U, BATCH_SZ, SKIP_DTOR, ZERO_POLICY> &o) noexcept:
-            _resource { o._resource }
-        {
-        }
+        pool_allocator_t &operator=(pool_allocator_t &&) noexcept =default;
 
         struct deleter_t {
-            using resource_type = detail::pool_allocator_resource_t<BATCH_SZ, ZERO_POLICY>;
+            using resource_type = detail::pool_allocator_resource_t<T, BATCH_SZ, ZERO_POLICY>;
             using resource_ref_type = std::conditional_t<
                 SKIP_DTOR, resource_type *, std::shared_ptr<resource_type>>;
             resource_ref_type resource {};
@@ -267,36 +172,24 @@ namespace turbo {
                 if constexpr (!SKIP_DTOR)
                     std::destroy_at(ptr);
                 if (resource) [[likely]]
-                    resource->deallocate(ptr, sizeof(T), alignof(T));
+                    resource->deallocate(ptr);
             }
         };
 
         using ptr_t = std::unique_ptr<T, deleter_t>;
 
-        [[nodiscard]] T *allocate(const size_t n=1)
+        [[nodiscard]] T *allocate()
         {
-            if (n > std::numeric_limits<size_t>::max() / sizeof(T)) [[unlikely]]
-                throw std::bad_array_new_length {};
-            return static_cast<T *>(_get_resource().allocate(n * sizeof(T), alignof(T)));
+            return _get_resource().allocate();
         }
 
-        void deallocate(T *ptr, const size_t n=1) noexcept
+        void deallocate(T *ptr) noexcept
         {
             if (!ptr) [[unlikely]]
                 return;
-            if (!_resource || n > std::numeric_limits<size_t>::max() / sizeof(T)) [[unlikely]]
+            if (!_resource) [[unlikely]]
                 std::terminate();
-            _resource->deallocate(ptr, n * sizeof(T), alignof(T));
-        }
-
-        [[nodiscard]] pool_allocator_t select_on_container_copy_construction() const
-        {
-            return fresh();
-        }
-
-        [[nodiscard]] pool_allocator_t fresh() const
-        {
-            return {};
+            _resource->deallocate(ptr);
         }
 
         template<typename... Args>
@@ -330,17 +223,8 @@ namespace turbo {
             _resource->recycle_all();
         }
 
-        template<typename U>
-        [[nodiscard]] bool operator==(const pool_allocator_t<U, BATCH_SZ, SKIP_DTOR, ZERO_POLICY> &o) const noexcept
-        {
-            return _resource == o._resource;
-        }
-
     private:
-        template<typename, size_t, bool, zero_policy_t>
-        friend struct pool_allocator_t;
-
-        using resource_type = detail::pool_allocator_resource_t<BATCH_SZ, ZERO_POLICY>;
+        using resource_type = detail::pool_allocator_resource_t<T, BATCH_SZ, ZERO_POLICY>;
         std::shared_ptr<resource_type> _resource {};
 
         resource_type &_get_resource()
