@@ -41,7 +41,7 @@ namespace turbo {
                 T *ptr = nullptr;
                 if (_free) {
                     ptr = static_cast<T *>(_free);
-                    std::memcpy(&_free, ptr, sizeof(_free));
+                    std::memcpy(&_free, static_cast<const void *>(ptr), sizeof(_free));
                     --_free_count;
                 } else {
                     if (_arenas.empty()) [[unlikely]] {
@@ -64,7 +64,8 @@ namespace turbo {
 
             void deallocate(T *ptr) noexcept
             {
-                std::memcpy(ptr, &_free, sizeof(_free));
+                // Reuse the slot's raw storage for the next free-list pointer.
+                std::memcpy(static_cast<void *>(ptr), &_free, sizeof(_free));
                 _free = ptr;
                 ++_free_count;
             }
