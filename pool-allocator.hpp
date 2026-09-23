@@ -8,6 +8,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <memory_resource>
 #include <new>
 #include <type_traits>
 #include <utility>
@@ -234,5 +235,84 @@ namespace turbo {
                 _resource = std::make_shared<resource_type>();
             return *_resource;
         }
+    };
+
+    // Copies and rebinds share an unsynchronized pool; their allocations and
+    // deallocations must not overlap across threads. Container copies get fresh pools.
+    template<typename T>
+    struct pmr_pool_allocator_t {
+        using value_type = T;
+        using size_type = size_t;
+        using difference_type = std::ptrdiff_t;
+        using propagate_on_container_move_assignment = std::true_type;
+        using propagate_on_container_swap = std::true_type;
+        using is_always_equal = std::false_type;
+
+        template<typename U>
+        struct rebind {
+            using other = pmr_pool_allocator_t<U>;
+        };
+
+        explicit pmr_pool_allocator_t(std::pmr::memory_resource *upstream=std::pmr::get_default_resource())
+            : _resource { std::make_shared<std::pmr::unsynchronized_pool_resource>(upstream) }
+        {
+        }
+
+        pmr_pool_allocator_t(const pmr_pool_allocator_t &) noexcept =default;
+        pmr_pool_allocator_t &operator=(const pmr_pool_allocator_t &) noexcept =default;
+
+        // A moved-from map can still own a sentinel allocated by this pool (MSVC).
+        pmr_pool_allocator_t(pmr_pool_allocator_t &&other) noexcept: _resource { other._resource }
+        {
+        }
+
+        pmr_pool_allocator_t &operator=(pmr_pool_allocator_t &&other) noexcept
+        {
+            _resource = other._resource;
+            return *this;
+        }
+
+        template<typename U>
+        pmr_pool_allocator_t(const pmr_pool_allocator_t<U> &other) noexcept: _resource { other._resource }
+        {
+        }
+
+        [[nodiscard]] T *allocate(const size_t n)
+        {
+            if (n > std::numeric_limits<size_t>::max() / sizeof(T))
+                throw std::bad_array_new_length {};
+            return static_cast<T *>(_resource->allocate(n * sizeof(T), alignof(T)));
+        }
+
+        void deallocate(T *ptr, const size_t n) noexcept
+        {
+            _resource->deallocate(ptr, n * sizeof(T), alignof(T));
+        }
+
+        pmr_pool_allocator_t select_on_container_copy_construction() const
+        {
+            return fresh();
+        }
+
+        pmr_pool_allocator_t fresh() const
+        {
+            return pmr_pool_allocator_t { _resource->upstream_resource() };
+        }
+
+        template<typename U>
+        bool operator==(const pmr_pool_allocator_t<U> &other) const noexcept
+        {
+            return _resource == other._resource;
+        }
+
+        friend void swap(pmr_pool_allocator_t &a, pmr_pool_allocator_t &b) noexcept
+        {
+            a._resource.swap(b._resource);
+        }
+    private:
+        template<typename>
+        friend struct pmr_pool_allocator_t;
+
+        std::shared_ptr<std::pmr::unsynchronized_pool_resource> _resource;
     };
 }

@@ -3,11 +3,35 @@
 
 #include "test.hpp"
 #include "pool-allocator.hpp"
+#include <cstdint>
+#include <map>
 #include <set>
 #include <stdexcept>
 
 namespace {
     using namespace turbo;
+
+    struct counting_resource: std::pmr::memory_resource {
+        size_t bytes = 0;
+    private:
+        void *do_allocate(const size_t n, const size_t alignment) override
+        {
+            auto *ptr = std::pmr::new_delete_resource()->allocate(n, alignment);
+            bytes += n;
+            return ptr;
+        }
+
+        void do_deallocate(void *ptr, const size_t n, const size_t alignment) override
+        {
+            std::pmr::new_delete_resource()->deallocate(ptr, n, alignment);
+            bytes -= n;
+        }
+
+        bool do_is_equal(const std::pmr::memory_resource &other) const noexcept override
+        {
+            return this == &other;
+        }
+    };
 }
 
 suite turbo_common_pool_allocator_suite = [] {
@@ -187,5 +211,68 @@ suite turbo_common_pool_allocator_suite = [] {
             expect(before == after);
         };
 
+    };
+
+    "turbo::common::pmr_pool_allocator"_test = [] {
+        "rebind, alignment and allocation size"_test = [] {
+            struct alignas(64) item { size_t value; };
+            pmr_pool_allocator_t<item> alloc {};
+            pmr_pool_allocator_t<std::byte> rebound { alloc };
+            pmr_pool_allocator_t<item> copy { rebound };
+            expect(copy == alloc);
+            auto *ptr = alloc.allocate(3);
+            expect(reinterpret_cast<uintptr_t>(ptr) % alignof(item) == 0);
+            std::construct_at(ptr + 2, item { 42 });
+            expect(ptr[2].value == 42_ul);
+            std::destroy_at(ptr + 2);
+            copy.deallocate(ptr, 3);
+            expect(throws<std::bad_array_new_length>([&] {
+                constexpr auto too_many = std::numeric_limits<size_t>::max() / sizeof(item) + 1;
+                auto *unexpected = alloc.allocate(too_many);
+                alloc.deallocate(unexpected, too_many);
+            }));
+        };
+
+        "container ownership"_test = [] {
+            using alloc_type = pmr_pool_allocator_t<std::pair<const int, std::shared_ptr<int>>>;
+            using map_type = std::map<int, std::shared_ptr<int>, std::less<int>, alloc_type>;
+            counting_resource upstream {};
+            std::weak_ptr<int> value;
+            {
+                map_type result { alloc_type { &upstream } };
+                {
+                    map_type source { alloc_type { &upstream } };
+                    source.emplace(1, std::make_shared<int>(42));
+                    value = source.at(1);
+                    const auto *node = &*source.begin();
+                    auto copy = source;
+                    expect(copy == source);
+                    expect(copy.get_allocator() != source.get_allocator());
+                    const auto copy_alloc = copy.get_allocator();
+
+                    const auto result_alloc = result.get_allocator();
+                    result = source;
+                    expect(result == source);
+                    expect(result.get_allocator() == result_alloc);
+                    const auto *copy_node = &*copy.begin();
+                    result.swap(copy);
+                    expect(result.get_allocator() == copy_alloc);
+                    expect(copy.get_allocator() == result_alloc);
+                    expect(&*result.begin() == copy_node);
+
+                    auto moved = std::move(source);
+                    source.emplace(2, std::make_shared<int>(2));
+                    result = std::move(moved);
+                    moved.emplace(3, std::make_shared<int>(3));
+                    expect(&*result.begin() == node);
+                    expect(result.get_allocator() == source.get_allocator());
+                }
+                expect(*result.at(1) == 42_i);
+                expect(upstream.bytes > 0);
+                result.clear();
+                expect(value.expired());
+            }
+            expect(upstream.bytes == 0_ul);
+        };
     };
 };
