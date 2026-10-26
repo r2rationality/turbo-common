@@ -50,10 +50,10 @@ namespace turbo::memory {
             std::getline(is, stat);
             auto pos = stat.find(' ');
             if (pos == stat.npos) [[unlikely]]
-                throw error(fmt::format("invalid /proc/self/statm file format: '{}'!", stat));
+                throw error{"invalid /proc/self/statm file format: '{}'!", stat};
             const auto rss_begin = stat.find_first_not_of(' ', pos);
             if (rss_begin == stat.npos) [[unlikely]]
-                throw error(fmt::format("invalid /proc/self/statm file format: '{}'!", stat));
+                throw error{"invalid /proc/self/statm file format: '{}'!", stat};
             pos = stat.find(' ', rss_begin);
             return (std::stoull(stat.substr(rss_begin, pos - rss_begin)) * page_size) >> 20U;
 #       else

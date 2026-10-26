@@ -215,7 +215,7 @@ namespace turbo::file {
                 _f = NULL; // The stream is unusable even if fclose fails.
                 // Keep failed closes counted conservatively: OS handle release is uncertain.
                 if (result != 0) [[unlikely]]
-                    throw error(fmt::format("failed to close file {}!", _path));
+                    throw error{"failed to close file {}!", _path};
                 _open_files().fetch_sub(1, std::memory_order_relaxed);
                 _buf.clear();
                 _buf.shrink_to_fit();
@@ -276,7 +276,7 @@ namespace turbo::file {
         if (num_bytes == 0)
             num_bytes = std::filesystem::file_size(path);
         if (v.size() != num_bytes) [[unlikely]]
-            throw error(fmt::format("span size: {} != the size of the file: {}", v.size(), num_bytes));
+            throw error{"span size: {} != the size of the file: {}", v.size(), num_bytes};
         read_stream is { path };
         is.read(v.data(), v.size());
     }

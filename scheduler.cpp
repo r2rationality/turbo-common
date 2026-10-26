@@ -139,12 +139,12 @@ namespace turbo {
         void on_error(const std::string &task_group, const error_observer_t &obs, const bool replace)
         {
             if (task_count(task_group) != 0) [[unlikely]]
-                throw error(fmt::format("observers for task '{}' must be configured before task submission!", task_group));
+                throw error{"observers for task '{}' must be configured before task submission!", task_group};
             const mutex::scoped_lock lock { _observers_mutex };
             auto [it, created] = _observers.emplace(task_group, obs);
             if (!created) {
                 if (!replace) [[unlikely]]
-                    throw error(fmt::format("task {}: on_error observer has already been set!", task_group));
+                    throw error{"task {}: on_error observer has already been set!", task_group};
                 it->second = obs;
             }
         }
@@ -202,7 +202,7 @@ namespace turbo {
         void wait_all_done(const std::string &task_group, const wait_all_submit_func_t &submit_func)
         {
             if (_num_workers < 4) [[unlikely]]
-                throw error(fmt::format("wait_all_done relies on a high worker count but got {} worker threads!", _num_workers));
+                throw error{"wait_all_done relies on a high worker count but got {} worker threads!", _num_workers};
             bool exp_false = false;
             if (!_wait_all_done_running.compare_exchange_strong(exp_false, true)) [[unlikely]]
                 throw error("concurrent wait_all_done calls are not allowed!");
@@ -299,7 +299,7 @@ namespace turbo {
                 throw;
             }
             if (state->errors.load(std::memory_order_acquire) > 0) [[unlikely]]
-                throw scheduler_error(fmt::format("wait_all_done {} - there were failed tasks; cannot continue", task_group));
+                throw scheduler_error{"wait_all_done {} - there were failed tasks; cannot continue", task_group};
         }
     private:
         struct completion_action {

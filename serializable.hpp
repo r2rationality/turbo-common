@@ -55,12 +55,12 @@ namespace turbo::codec {
     void variant_set_type(T &val, const size_t requested_type, auto &archive)
     {
         if (requested_type >= std::variant_size_v<T>) [[unlikely]]
-            throw error(fmt::format("an unsupported type value {} for {}", requested_type, typeid(T).name()));
+            throw error{"an unsupported type value {} for {}", requested_type, typeid(T).name()};
         if constexpr (I < std::variant_size_v<T>) {
             if (requested_type > I)
                 return variant_set_type<T, I + 1>(val, requested_type, archive);
             if (requested_type < I) [[unlikely]]
-                throw error(fmt::format("internal error: an incomplete traversal of type {}", typeid(T).name()));
+                throw error{"internal error: an incomplete traversal of type {}", typeid(T).name()};
             val = codec::from<std::variant_alternative_t<I, T>>(archive);
         }
     }
@@ -155,7 +155,7 @@ namespace turbo::codec {
     void check_bounds(const size_t sz)
     {
         if (!(static_cast<int>(sz >= T::min_size) & static_cast<int>(sz <= T::max_size))) [[unlikely]]
-            throw error(fmt::format("array size {} is out of allowed bounds: [{}, {}]", sz, T::min_size, T::max_size));
+            throw error{"array size {} is out of allowed bounds: [{}, {}]", sz, T::min_size, T::max_size};
     }
 
     template<bounded_range_c T>
@@ -279,7 +279,7 @@ namespace turbo::codec {
                 _it = fmt::format_to(_it, "{}", val);
                 _ends_with_newline = false;
             } else {
-                throw error(fmt::format("formatter serialization is not enabled for type {}", typeid(T).name()));
+                throw error{"formatter serialization is not enabled for type {}", typeid(T).name()};
             }
         }
 

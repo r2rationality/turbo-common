@@ -16,12 +16,12 @@ suite common_error_bench_suite = [] {
             .performanceCounters(true)
             .relative(true);
         {
-            b.run("construct one-param",[&] {
-                ankerl::nanobench::doNotOptimizeAway(error(fmt::format("Hello {}!", "world")));
+            b.run("construct formatted",[&] {
+                ankerl::nanobench::doNotOptimizeAway(error{"Hello {}!", "world"});
             });
             b.run("construct, throw, and catch",[&] {
                 try {
-                    throw error(fmt::format("Hello {}!", "world"));
+                    throw error{"Hello {}!", "world"};
                 } catch (const error &err) {
                     ankerl::nanobench::doNotOptimizeAway(err);
                 }

@@ -74,7 +74,7 @@ namespace turbo {
             std::span<const uint8_t>{data, sz}
         {
             if (data == nullptr && sz != 0) [[unlikely]]
-                throw error(fmt::format("a buffer cannot have a non-zero size {} with a null data pointer!", sz));
+                throw error{"a buffer cannot have a non-zero size {} with a null data pointer!", sz};
         }
 
         buffer &operator=(const buffer &o) =default;
@@ -90,7 +90,7 @@ namespace turbo {
         {
             static_assert(std::is_trivially_copyable_v<M>);
             if (size() != sizeof(M)) [[unlikely]]
-                throw error(fmt::format("buffer size: {} does not match the type's size: {}!", size(), sizeof(M)));
+                throw error{"buffer size: {} does not match the type's size: {}!", size(), sizeof(M)};
             return load_unaligned<M>(data());
         }
 
@@ -98,7 +98,7 @@ namespace turbo {
         constexpr M to_host() const
         {
             if (size() != sizeof(M)) [[unlikely]]
-                throw error(fmt::format("buffer size: {} does not match the type's size: {}!", size(), sizeof(M)));
+                throw error{"buffer size: {} does not match the type's size: {}!", size(), sizeof(M)};
             return net_to_host(to<M>());
         }
 
@@ -129,21 +129,21 @@ namespace turbo {
         {
             if (off < size()) [[likely]]
                 return (*this)[off];
-            throw error(fmt::format("requested offset: {} that behind the end of buffer: {}!", off, size()));
+            throw error{"requested offset: {} that behind the end of buffer: {}!", off, size()};
         }
 
         [[nodiscard]] buffer subbuf(const size_t offset, const size_t sz) const
         {
             if (static_cast<int>(offset <= size()) & static_cast<int>(sz <= size() - offset)) [[likely]]
                 return buffer { data() + offset, sz };
-            throw error(fmt::format("requested offset: {} and size: {} end over the end of buffer's size: {}!", offset, sz, size()));
+            throw error{"requested offset: {} and size: {} end over the end of buffer's size: {}!", offset, sz, size()};
         }
 
         [[nodiscard]] buffer subbuf(const size_t offset) const
         {
             if (offset <= size()) [[likely]]
                 return subbuf(offset, size() - offset);
-            throw error(fmt::format("a buffer's offset {} is greater than its size {}", offset, size()));
+            throw error{"a buffer's offset {} is greater than its size {}", offset, size()};
         }
     };
 
@@ -165,7 +165,7 @@ namespace turbo {
 
         byte_array(const std::initializer_list<uint8_t> s) {
             if (s.size() != SZ) [[unlikely]]
-                throw error(fmt::format("span must be of size {} but got {}", SZ, s.size()));
+                throw error{"span must be of size {} but got {}", SZ, s.size()};
             size_t i = 0;
             for (const auto b: s)
                 *(base_type::data() + i++) = b;
@@ -174,21 +174,21 @@ namespace turbo {
         byte_array(const buffer s)
         {
             if (s.size() != SZ) [[unlikely]]
-                throw error(fmt::format("byte string must be of size {} but got {}", SZ, s.size()));
+                throw error{"byte string must be of size {} but got {}", SZ, s.size()};
             memcpy(this, std::data(s), SZ);
         }
 
         byte_array(const std::string_view s)
         {
             if (s.size() != SZ) [[unlikely]]
-                throw error(fmt::format("string_view must be of size {} but got {}", SZ, s.size()));
+                throw error{"string_view must be of size {} but got {}", SZ, s.size()};
             memcpy(this, std::data(s), SZ);
         }
 
         byte_array &operator=(const buffer s)
         {
             if (s.size() != SZ) [[unlikely]]
-                throw error(fmt::format("byte string must be of size {} but got {}", SZ, s.size()));
+                throw error{"byte string must be of size {} but got {}", SZ, s.size()};
             memcpy(this, std::data(s), SZ);
             return *this;
         }
@@ -196,7 +196,7 @@ namespace turbo {
         byte_array &operator=(const std::string_view s)
         {
             if (s.size() != SZ) [[unlikely]]
-                throw error(fmt::format("string_view must be of size {} but got {}", SZ, s.size()));
+                throw error{"string_view must be of size {} but got {}", SZ, s.size()};
             memcpy(this, std::data(s), SZ);
             return *this;
         }
@@ -211,7 +211,7 @@ namespace turbo {
             const auto byte_no = bit_no >> 3U;
             const auto byte_bit_no = size_t{7} - (bit_no & 0x7);
             if (byte_no >= SZ) [[unlikely]]
-                throw error(fmt::format("a bit number {} is out of range for byte strings of {} bytes", bit_no, SZ));
+                throw error{"a bit number {} is out of range for byte strings of {} bytes", bit_no, SZ};
             return base_type::operator[](byte_no) & (1U << byte_bit_no);
         }
 
@@ -255,7 +255,7 @@ namespace turbo {
             case '5': return 5;
             case '6': return 6;
             case '7': return 7;
-            [[unlikely]] default: throw error(fmt::format("unexpected character in an octal number: {}!", k));
+            [[unlikely]] default: throw error{"unexpected character in an octal number: {}!", k};
         }
     }
 
@@ -281,13 +281,13 @@ namespace turbo {
         };
         if (const auto res = map[k]; res != 0xFF) [[likely]]
             return res;
-        throw error(fmt::format("unexpected character in a hex number: {}!", k));
+        throw error{"unexpected character in a hex number: {}!", k};
     }
 
     inline void init_from_hex_no_prefix(std::span<uint8_t> out, const std::string_view hex)
     {
         if (hex.size() != out.size() * 2) [[unlikely]]
-            throw error(fmt::format("hex string must have {} characters but got {}: {}!", out.size() * 2, hex.size(), hex));
+            throw error{"hex string must have {} characters but got {}: {}!", out.size() * 2, hex.size(), hex};
         for (size_t i = 0; i < out.size(); ++i)
             out[i] = static_cast<uint8_t>(uint_from_hex(hex[i * 2]) << 4U) | uint_from_hex(hex[i * 2 + 1]);
     }
@@ -309,7 +309,7 @@ namespace turbo {
             if (hex.starts_with("0x"))
                 hex = hex.substr(2);
             if (hex.size() % 2 != 0) [[unlikely]]
-                throw error(fmt::format("hex string must have an even number of characters but got {}!", hex.size()));
+                throw error{"hex string must have an even number of characters but got {}!", hex.size()};
             C data(hex.size() / 2);
             init_from_hex_no_prefix(data, hex);
             return data;

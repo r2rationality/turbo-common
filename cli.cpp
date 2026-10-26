@@ -40,7 +40,7 @@ namespace turbo::cli {
                         meta.cfg.opts.emplace(name, cfg);
                 }
                 if (const auto [it, created] = commands.try_emplace(meta.cfg.name, std::move(meta)); !created) [[unlikely]]
-                    throw error(fmt::format("multiple definitions for {}", meta.cfg.name));
+                    throw error{"multiple definitions for {}", meta.cfg.name};
             }
             if (argc < 2) {
                 std::cerr << "Usage: <command> [<arg> ...], where <command> is one of:\n" ;

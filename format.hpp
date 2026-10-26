@@ -40,7 +40,7 @@ namespace turbo {
 
         template<typename ...Args>
         explicit fmt_error(const std::source_location &loc, const char *fmt, Args&&... a):
-            error { fmt::format("{} in {}", fmt::format(fmt::runtime(fmt), std::forward<Args>(a)...), loc) }
+            error { "{} in {}", fmt::format(fmt::runtime(fmt), std::forward<Args>(a)...), loc }
         {
         }
     };

@@ -136,7 +136,7 @@ namespace turbo::file {
     void set_install_path_exact(const std::filesystem::path &p)
     {
         if (!_path_absolute(p)) [[unlikely]]
-            throw error(fmt::format("file::set_install_path_exact requires and absolute path but got: {}", p));
+            throw error{"file::set_install_path_exact requires and absolute path but got: {}", p};
         _install_dir() = p;
     }
 
@@ -144,14 +144,14 @@ namespace turbo::file {
     {
         std::filesystem::path bp{bin_path};
         if (bp.empty()) [[unlikely]]
-            throw error(fmt::format("set_install_path: bin_path must not be empty!"));
+            throw error{"set_install_path: bin_path must not be empty!"};
         if (!_path_absolute(bp))
             bp = _path_append(std::filesystem::current_path(), bp);
         auto ip = bp;
         for (size_t i = 0; i < 2; ++i) {
             auto pp = _path_parent(ip);
             if (pp.empty() || pp == ip) [[unlikely]]
-                throw error(fmt::format("set_install_path: bin_path must have at least two parent directories: {}!", bin_path));
+                throw error{"set_install_path: bin_path must have at least two parent directories: {}!", bin_path};
             ip = pp;
         }
         set_install_path_exact(ip);

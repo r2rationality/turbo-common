@@ -138,10 +138,10 @@ namespace turbo::cli {
                     }
                     const auto cfg_it = cfg.opts.find(name);
                     if (cfg_it == cfg.opts.end()) [[unlikely]]
-                        throw error(fmt::format("unknown option '--{}'", name));
+                        throw error{"unknown option '--{}'", name};
                     const auto [opt_it, opt_created] = pr.opts.try_emplace(name, std::move(val));
                     if (!opt_created) [[unlikely]]
-                        throw error(fmt::format("duplicate option specification '{}'", arg));
+                        throw error{"duplicate option specification '{}'", arg};
                 } else {
                     pr.args.emplace_back(arg);
                 }
@@ -152,7 +152,7 @@ namespace turbo::cli {
                 // creates an empty value if not initialized
                 if (const auto &val_it = pr.opts.find(name); cfg.validator && val_it != pr.opts.end()) {
                     if (const auto val_err = (*cfg.validator)(val_it->second); val_err) [[unlikely]]
-                        throw error(fmt::format("value {} is invalid for '--{}': {}", val_it->second.value_or("<empty>"), name, *val_err));
+                        throw error{"value {} is invalid for '--{}': {}", val_it->second.value_or("<empty>"), name, *val_err};
                 }
             }
             if (cfg.args.min && pr.args.size() < *cfg.args.min)
@@ -226,7 +226,7 @@ namespace turbo::cli {
         T value;
         const auto [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), value);
         if (ec != std::errc() || ptr != str.data() + str.size()) [[unlikely]]
-            throw error(fmt::format("failed to parse {} from '{}'", str, typeid(T).name()));
+            throw error{"failed to parse {} from '{}'", str, typeid(T).name()};
         return value;
     }
 }

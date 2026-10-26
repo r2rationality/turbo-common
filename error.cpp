@@ -42,12 +42,12 @@ namespace turbo {
     }
 
     error::error(const std::string_view msg, const std::exception &ex)
-        : error { fmt::format("{} caused by {}: {}", msg, typeid(ex).name(), ex.what()) }
+        : error { "{} caused by {}: {}", msg, typeid(ex).name(), ex.what() }
     {
     }
 
     error_sys::error_sys(const std::string_view msg)
-        : error { fmt::format("{} errno: {} strerror: {}", msg, errno, std::strerror(errno)) }
+        : error { "{} errno: {} strerror: {}", msg, errno, std::strerror(errno) }
     {
     }
 }
