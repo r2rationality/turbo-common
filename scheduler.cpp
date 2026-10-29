@@ -10,6 +10,7 @@
 #include <memory>
 #include <queue>
 #include <source_location>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -339,7 +340,11 @@ namespace turbo {
         std::condition_variable_any _tasks_cv alignas(mutex::alignment) {};
         std::condition_variable_any _tasks_done_cv {};
         task_queue _tasks {};
+        static constexpr std::string_view wait_task_name { "__WAIT_FOR_TASKS__" };
         task_stats_map _task_stats {};
+        // Rehashing preserves this reference; the entry must never be erased.
+        // Workers are joined before the map is destroyed.
+        task_stat &_wait_stat = _task_stats.try_emplace(std::string { wait_task_name }).first->second;
 
         mutable mutex::unique_lock::mutex_type _process_mutex alignas(mutex::alignment) {};
         std::condition_variable_any _process_cv alignas(mutex::alignment) {};
@@ -477,13 +482,12 @@ namespace turbo {
 
         bool _worker_try_execute(size_t worker_idx, const std::optional<std::chrono::milliseconds> wait_interval_ms)
         {
-            static std::string wait_task_name { "__WAIT_FOR_TASKS__" };
             const auto sleep_start_time = std::chrono::system_clock::now();
             mutex::unique_lock lock { _tasks_mutex };
             _tasks_cv.wait_for(lock, *wait_interval_ms, [&] {
                 return !_tasks.empty() || _destroy;
             });
-            _task_stats[wait_task_name].cpu_time += std::chrono::duration<double> { std::chrono::system_clock::now() - sleep_start_time }.count();
+            _wait_stat.cpu_time += std::chrono::duration<double> { std::chrono::system_clock::now() - sleep_start_time }.count();
             if (_destroy) [[unlikely]]
                 return false;
             if (!_tasks.empty())
